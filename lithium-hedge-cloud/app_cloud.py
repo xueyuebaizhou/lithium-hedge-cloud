@@ -98,7 +98,6 @@ class CloudUserAuth:
             return False, "请输入有效的邮箱地址"
         
         result = self.supabase.create_user(username, password, email)
-@@ -99,51 +130,51 @@ class CloudUserAuth:
         success, result = self.login(username, old_password)
         if not success:
             return False, "原密码错误"
@@ -151,7 +150,6 @@ class CloudLithiumAnalyzer:␊
             if cached_data is not None:
                 self.cache_data[cache_key] = cached_data
                 self.cache_time[cache_key] = current_time
-@@ -364,170 +395,182 @@ class CloudLithiumAnalyzer:
         ax.plot(price_changes * 100, hedge_profits, 'g-', linewidth=2.5, label='套保后盈亏')
         
         ax.set_xlabel('未来价格变化百分比 (%)', fontsize=13)
@@ -415,7 +413,6 @@ class CloudLithiumAnalyzer:␊
             display_data = price_data.tail(30)
             title_suffix = '近30日'
         elif period == '3m':
-@@ -575,243 +618,276 @@ class CloudLithiumAnalyzer:
                        arrowprops=dict(arrowstyle='->', color='red', lw=1.5),
                        fontsize=11, color='red', ha='center',
                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
@@ -758,7 +755,7 @@ def render_auth_page(analyzer):
                 confirm_password = st.text_input("确认密码", type="password", 
                                                key="reg_password2")
                 
-@@ -833,673 +909,697 @@ def render_auth_page(analyzer):
+
                         st.error("两次输入的密码不一致")
                     elif len(new_password) < 6:
                         st.error("密码长度至少6位")
@@ -2650,3 +2647,4 @@ if __name__ == "__main__":
         st.error(f"应用程序运行出错: {str(e)}")
         st.code(traceback.format_exc())
         st.info("请检查：\n1. 网络连接\n2. 环境变量配置\n3. 依赖包安装")
+
