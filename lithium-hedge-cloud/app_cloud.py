@@ -322,10 +322,11 @@ class CloudLithiumAnalyzer:
             display_data = price_data.tail(30)
             title_suffix = '近30日'
         elif period == '3m':
-                       arrowprops=dict(arrowstyle='->', color='red', lw=1.5),
-                       fontsize=11, color='red', ha='center',
-                       bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
-            
+            ax.annotate(f'{max_price:.0f}',xy=(max_date, max_price),
+                        xytext=(max_date, max_price * 1.02),
+                        arrowprops=dict(arrowstyle='->', color='red', lw=1.5),
+                        fontsize=11, color='red', ha='center',
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
             ax.annotate(f'{min_price:,.0f}', xy=(min_date, min_price),
                        xytext=(min_date, min_price * 0.98),
                        arrowprops=dict(arrowstyle='->', color='green', lw=1.5),
@@ -2268,5 +2269,6 @@ if __name__ == "__main__":
         st.error(f"应用程序运行出错: {str(e)}")
         st.code(traceback.format_exc())
         st.info("请检查：\n1. 网络连接\n2. 环境变量配置\n3. 依赖包安装")
+
 
 
