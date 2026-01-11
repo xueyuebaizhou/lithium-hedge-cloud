@@ -4,18 +4,10 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
-import matplotlib.pyplot as plt
-import matplotlib
 from matplotlib import font_manager
 import os
 import sys
 from datetime import datetime, timedelta
-import warnings
-import json
-import io
-import base64
-import hashlib
-import traceback
 import warnings
 import json
 import io
@@ -38,9 +30,7 @@ except ImportError as e:
     HAS_SUPABASE = False
     print(f"Supabase导入失败: {e}")
 
-# 设置中文字体
-matplotlib.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'DejaVu Sans']
-matplotlib.rcParams['axes.unicode_minus'] = False
+
 def ensure_chinese_font():
     """确保云端环境可用中文字体。"""
     font_dir = os.path.join(os.path.dirname(__file__), 'data', 'fonts')
@@ -123,7 +113,6 @@ class CloudUserAuth:
 # 数据分析器（云端版）
 # ============================================================================
 
-class CloudLithiumAnalyzer:␍␊
 class CloudLithiumAnalyzer:␊
     """云端碳酸锂数据分析器"""
     
@@ -175,8 +164,6 @@ class CloudLithiumAnalyzer:␊
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, pos: format_y_axis(x)))
         
         ax.grid(True, alpha=0.3, linestyle='--')
-        ax.axhline(y=0, color='k', linestyle='-', linewidth=0.8)␍␊
-        ax.axvline(x=0, color='b', linestyle='--', linewidth=1.5, alpha=0.7, label='当前价格')␍␊
         ax.axhline(y=0, color='k', linestyle='-', linewidth=0.8)␊
         ax.axvline(x=0, color='b', linestyle='--', linewidth=1.5, alpha=0.7, label='当前价格')␊
         
@@ -186,10 +173,6 @@ class CloudLithiumAnalyzer:␊
         
         ax.legend(fontsize=12, loc='best', framealpha=0.9)
         
-        # 添加当前点标注
-        current_profit_no_hedge = (current_price - cost_price) * inventory
-        ax.scatter(0, current_profit_no_hedge, color='r', s=100, zorder=5)
-        ax.scatter(0, current_profit_no_hedge, color='g', s=100, zorder=5)
         # 添加当前点标注
         current_profit_no_hedge = (current_price - cost_price) * inventory
         ax.scatter(0, current_profit_no_hedge, color='r', s=100, zorder=5)
@@ -209,80 +192,6 @@ class CloudLithiumAnalyzer:␊
         
         # 生成建议文本
         suggestions = []
-        suggestions.append("### 📊 套保分析报告")
-        suggestions.append(f"**数据来源**：akshare实时市场数据")
-        suggestions.append(f"**分析时间**：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        suggestions.append(f"**数据日期**：{latest_date.strftime('%Y-%m-%d')}")
-        
-        suggestions.append("\n### ⚙️ 输入参数")
-        suggestions.append(f"- **存货成本价**：{cost_price:,.2f} 元/吨")
-        suggestions.append(f"- **存货数量**：{inventory:,.2f} 吨")
-        suggestions.append(f"- **套保比例**：{hedge_ratio*100:.1f}%")
-        suggestions.append(f"- **保证金比例**：{margin_rate*100:.0f}%")
-        
-        suggestions.append("\n### 📈 市场数据")
-        suggestions.append(f"- **当前市场价格**：{current_price:,.2f} 元/吨")
-        suggestions.append(f"- **每吨盈亏**：{profit_per_ton:,.2f} 元/吨 ({profit_percentage:.2f}%)")
-        suggestions.append(f"- **总盈亏**：{current_profit:,.2f} 元")
-        
-        suggestions.append("\n### 🎯 套保方案")
-        suggestions.append(f"- **理论套保手数**：{hedge_contracts:.2f} 手")
-        suggestions.append(f"- **实际套保手数**：{hedge_contracts_int} 手 (四舍五入取整)")
-        suggestions.append(f"- **实际套保比例**：{hedge_contracts_int/inventory*100:.2f}%")
-        suggestions.append(f"- **每手保证金**：{margin_per_contract:,.2f} 元")
-        suggestions.append(f"- **总保证金要求**：{total_margin:,.2f} 元")
-        suggestions.append(f"- **保证金占存货价值**：{total_margin/total_value*100:.2f}%")
-        
-        suggestions.append("\n### ⚠️ 风险分析")
-        suggestions.append(f"- **不套保盈亏平衡点**：{no_hedge_breakeven:,.2f} 元/吨 (较当前价{no_hedge_breakeven_pct:.1f}%)")
-        suggestions.append(f"- **套保后盈亏平衡点**：{hedge_breakeven_str}")
-        
-        suggestions.append("\n### 💡 操作建议")
-        
-        if hedge_ratio < 0.1:
-            suggestions.append("**评估**：⚡ 套保比例极低，风险敞口极大")
-            suggestions.append("**建议**：立即将套保比例提高至50%以上")
-        elif hedge_ratio < 0.3:
-            suggestions.append("**评估**：⚠️ 套保比例较低，存在较大价格风险")
-            suggestions.append("**建议**：考虑提高套保比例至60-80%")
-        elif hedge_ratio < 0.7:
-            suggestions.append("**评估**：✅ 套保比例适中，风险可控")
-            suggestions.append("**建议**：维持当前比例或根据市场情况微调")
-        elif hedge_ratio <= 1.0:
-            suggestions.append("**评估**：🛡️ 套保比例充足，有效对冲风险")
-            suggestions.append("**建议**：当前比例合适，关注市场变化")
-        else:
-            suggestions.append("**评估**：🚨 过度套保，可能产生额外风险")
-            suggestions.append("**建议**：将套保比例调整至100%以内")
-        
-        if current_profit > 0:
-            suggestions.append(f"\n**盈利状态**：💰 当前盈利{profit_percentage:.2f}%，建议部分套保锁定利润")
-            if profit_percentage > 20:
-                suggestions.append("**策略建议**：可考虑锁定30-50%的利润")
-        else:
-            suggestions.append(f"\n**亏损状态**：📉 当前亏损{abs(profit_percentage):.2f}%，建议加强套保防止进一步亏损")
-            if abs(profit_percentage) > 10:
-                suggestions.append("**策略建议**：考虑提高套保比例至80-100%")
-        
-        if hedge_contracts_int > 0:
-            suggestions.append("\n### ✅ 实施方案")
-            suggestions.append(f"1. **资金准备**：准备 {total_margin:,.0f} 元作为期货保证金")
-            suggestions.append("2. **合约选择**：选择LC0主力合约或对应月份合约")
-            suggestions.append("3. **交易方向**：卖出空头合约对冲价格下跌风险")
-            suggestions.append("4. **入场时机**：根据市场走势选择合适入场点")
-            suggestions.append("5. **风险监控**：每日关注价格变化和保证金情况")
-            suggestions.append("6. **调整策略**：根据市场变化动态调整套保比例")
-        else:
-            suggestions.append("\n### ⚠️ 风险提示")
-            suggestions.append(f"套保手数为0，无法有效对冲价格风险")
-            suggestions.append(f"建议将套保比例从{hedge_ratio*100:.1f}%提高至至少50%")
-        
-        suggestions.append("\n### 📝 注意事项")
-        suggestions.append("1. **基差风险**：期货价格与现货价格可能存在差异")
-        suggestions.append("2. **保证金风险**：价格剧烈波动可能导致保证金追加")
-        suggestions.append("3. **流动性风险**：市场流动性不足可能影响平仓")
-        suggestions.append("4. **操作风险**：期货交易需要专业知识和经验")
-        suggestions.append("5. **免责声明**：本分析仅供参考，不构成投资建议")
         suggestions.append("### 套保分析报告")
         suggestions.append(f"**数据来源**：akshare实时市场数据")
         suggestions.append(f"**分析时间**：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -386,7 +295,7 @@ class CloudLithiumAnalyzer:␊
             )
             
             if analysis_id:
-                suggestions.append(f"\n**分析记录**：✅ 已保存到云端 (ID: {analysis_id})")
+         
                 suggestions.append(f"\n**分析记录**：已保存到云端 (ID: {analysis_id})")
         
         return fig, "\n".join(suggestions), {
@@ -438,7 +347,6 @@ class CloudLithiumAnalyzer:␊
         
         # 生成统计信息
         stats_text = []
-        stats_text.append(f"### 📈 {title_suffix}市场统计")
         stats_text.append(f"### {title_suffix}市场统计")
         stats_text.append(f"**数据期间**：{display_data['日期'].min().strftime('%Y-%m-%d')} 至 {display_data['日期'].max().strftime('%Y-%m-%d')}")
         stats_text.append(f"**最新价格**：{display_data['收盘价'].iloc[-1]:,.2f} 元/吨")
@@ -490,16 +398,6 @@ class CloudLithiumAnalyzer:␊
             st.session_state.user_info['user_id']
         )
 
-    def delete_history_record(self, analysis_id):
-        """删除历史记录"""
-        if not self.supabase or 'user_info' not in st.session_state:
-            return False
-        
-        return self.supabase.delete_analysis(
-            analysis_id,
-            st.session_state.user_info['user_id']
-        )
-
 # ============================================================================
 # 金融工具函数
 # ============================================================================
@@ -527,12 +425,6 @@ def black_scholes_price(option_type: str, spot: float, strike: float, time_years
 # ============================================================================
 
 def main():
-    st.set_page_config(␍␊
-        page_title="碳酸锂期货套保分析系统（云端版）",␍␊
-        page_icon="☁️📈",
-        layout="wide",␍␊
-        initial_sidebar_state="expanded"␍␊
-    )␍␊
     st.set_page_config(␊
         page_title="碳酸锂期货套保分析系统（云端版）",␊
         page_icon="LC",
@@ -560,44 +452,6 @@ def main():
         st.session_state.force_refresh = False
     
     # 自定义CSS
-    st.markdown("""
-    <style>
-    .cloud-badge {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 3px 12px;
-        border-radius: 20px;
-        font-size: 0.8rem;
-        font-weight: bold;
-        display: inline-block;
-        margin-left: 10px;
-        vertical-align: middle;
-    }
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        text-align: center;
-        margin-bottom: 1rem;
-    }
-    .data-source {
-        font-size: 0.8rem;
-        color: #666;
-        text-align: right;
-        margin-top: -15px;
-        margin-bottom: 20px;
-    }
-    .stButton > button {
-        transition: all 0.3s ease;
-    }
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-    }
-    </style>
-    """, unsafe_allow_html=True)
     st.markdown("""
     <style>
     html, body, [class*="css"]  {
@@ -650,12 +504,6 @@ def main():
     
     # 检查Supabase连接状态
     with st.sidebar:
-        if HAS_SUPABASE:␍␊
-            st.success("✅ Supabase连接正常")
-        else:␍␊
-            st.error("⚠️ Supabase未配置")
-            st.info("请设置环境变量：SUPABASE_URL和SUPABASE_KEY")␍␊
-            st.info("当前使用本地模拟模式")␍␊
         if HAS_SUPABASE:␊
             st.success("Supabase连接正常")
         else:␊
@@ -682,10 +530,6 @@ def main():
 
 def render_auth_page(analyzer):
     """渲染登录/注册页面"""
-    st.markdown('<h1 class="main-header">☁️ 碳酸锂期货套保分析系统</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align:center;color:#666;font-size:1.2rem;">云端存储 · 实时数据 · 专业分析</p>', unsafe_allow_html=True)
-    ␍␊
-    tab1, tab2 = st.tabs(["🔐 用户登录", "📝 新用户注册"])
     st.markdown('<h1 class="main-header">碳酸锂期货套保分析系统</h1>', unsafe_allow_html=True)
     st.markdown('<p style="text-align:left;color:#6e6e73;font-size:1.1rem;">云端存储 · 实时数据 · 专业分析</p>', unsafe_allow_html=True)
     ␊
@@ -728,7 +572,6 @@ def render_auth_page(analyzer):
                         st.rerun()
                 
                 # 演示账号（可选）
-                with st.expander("💡 快速体验"):
                 with st.expander("快速体验"):
                     st.markdown("""
                     **演示账号**：
@@ -781,7 +624,6 @@ def render_auth_page(analyzer):
 
 def render_forgot_password(analyzer):
     """渲染忘记密码页面"""
-    st.markdown("### 🔑 找回密码")
     st.markdown("### 找回密码")
     
     with st.container():
@@ -814,7 +656,6 @@ def render_forgot_password(analyzer):
 
 def render_reset_password(analyzer):
     """渲染重置密码页面"""
-    st.markdown(f"### 🔑 重置密码 - {st.session_state.reset_username}")
     st.markdown(f"### 重置密码 - {st.session_state.reset_username}")
     
     with st.container():
@@ -857,48 +698,7 @@ def render_reset_password(analyzer):
                     st.session_state.reset_username = None
                     st.rerun()
 
-def render_main_app(analyzer):
-    """渲染主应用界面"""
-    # 顶部导航栏
-    col1, col2, col3, col4, col5, col6, col7 = st.columns([3, 1, 1, 1, 1, 1, 1])
-    
-    with col1:
-        st.markdown(f"<h2 style='margin:0;'>📈 碳酸锂套保分析系统</h2>", unsafe_allow_html=True)
-        st.markdown(f"<span class='cloud-badge'>云端版</span>", unsafe_allow_html=True)
-    
-    # 导航按钮
-    pages = ["首页", "套保计算", "价格行情", "分析历史", "账号设置"]
-    page_icons = ["🏠", "🧮", "📊", "📜", "⚙️"]
-    
-    for i, (page, icon) in enumerate(zip(pages, page_icons)):
-        col = [col2, col3, col4, col5, col6][i]
-        with col:
-            if st.button(f"{icon} {page}", use_container_width=True, 
-                        help=f"切换到{page}页面"):
-                st.session_state.current_page = page
-                st.rerun()
-    
-    # 显示用户信息和数据来源
-    user_info = st.session_state.user_info
-    st.markdown(f"<p style='text-align:right;color:#666;'>👤 {user_info['username']} | ☁️ 云端存储 | 📅 {datetime.now().strftime('%Y-%m-%d')}</p>", 
-                unsafe_allow_html=True)
-    
-    st.markdown('<p class="data-source">数据来源：akshare金融数据接口 | 数据更新：实时</p>', 
-                unsafe_allow_html=True)
-    
-    st.divider()
-    
-    # 页面内容路由
-    if st.session_state.current_page == "首页":
-        render_home_page(analyzer)
-    elif st.session_state.current_page == "套保计算":
-        render_hedge_page(analyzer)
-    elif st.session_state.current_page == "价格行情":
-        render_price_page(analyzer)
-    elif st.session_state.current_page == "分析历史":
-        render_history_page(analyzer)
-    elif st.session_state.current_page == "账号设置":
-        render_settings_page(analyzer)
+
 def render_main_app(analyzer):
     """渲染主应用界面"""
     pages = [
@@ -955,9 +755,7 @@ def render_main_app(analyzer):
     elif st.session_state.current_page == "账号设置":
         render_settings_page(analyzer)
 
-def render_home_page(analyzer):␍␊
-    """渲染首页"""␍␊
-    st.markdown("<h1>🏠 系统首页</h1>", unsafe_allow_html=True)
+
 def render_home_page(analyzer):␊
     """渲染首页"""␊
     st.markdown("<h1>系统首页</h1>", unsafe_allow_html=True)
@@ -967,7 +765,7 @@ def render_home_page(analyzer):␊
     st.markdown(f"### 欢迎回来，{user_info['username']}！")
     
     # 快速开始卡片
-    st.markdown("### 🚀 快速开始")
+
     st.markdown("### 快速开始")
     
     col1, col2, col3 = st.columns(3)
@@ -975,8 +773,7 @@ def render_home_page(analyzer):␊
     with col1:
         card1 = st.container()
         with card1:
-            st.markdown("### 🧮 套保计算")
-            st.markdown("基于当前市场价格，计算最优套保方案")␍␊
+
             st.markdown("### 套保计算")
             st.markdown("基于当前市场价格，计算最优套保方案")␊
             if st.button("开始计算", key="home_calc", use_container_width=True):
@@ -986,8 +783,6 @@ def render_home_page(analyzer):␊
     with col2:
         card2 = st.container()
         with card2:
-            st.markdown("### 📊 价格行情")
-            st.markdown("查看碳酸锂期货实时价格走势")␍␊
             st.markdown("### 价格行情")
             st.markdown("查看碳酸锂期货实时价格走势")␊
             if st.button("查看行情", key="home_price", use_container_width=True):
@@ -997,8 +792,7 @@ def render_home_page(analyzer):␊
     with col3:
         card3 = st.container()
         with card3:
-            st.markdown("### 📜 分析历史")
-            st.markdown("查看您的历史分析记录")␍␊
+
             st.markdown("### 分析历史")
             st.markdown("查看您的历史分析记录")␊
             if st.button("查看历史", key="home_history", use_container_width=True):
@@ -1006,10 +800,10 @@ def render_home_page(analyzer):␊
                 st.rerun()
     
     # 系统功能介绍
-    st.markdown("### 🌟 系统功能")
+
     st.markdown("### 系统功能")
     
-    with st.expander("📈 套保计算功能", expanded=True):
+
     with st.expander("套保计算功能", expanded=True):
         st.markdown("""
         **核心计算功能**：
@@ -1021,12 +815,10 @@ def render_home_page(analyzer):␊
         **计算参数**：
         - 存货成本价：0-500,000元/吨
         - 存货数量：0-10,000吨
-        - 套保比例：0%-200%
         - 套保比例：0%-100%
         - 保证金比例：默认15%（可配置）
         """)
     
-    with st.expander("📊 价格行情功能"):
     with st.expander("价格行情功能"):
         st.markdown("""
         **实时数据**：
@@ -1046,11 +838,7 @@ def render_home_page(analyzer):␊
         - 多周期查看
         """)
     
-    with st.expander("☁️ 云端功能"):
-        st.markdown("""␍␊
-        **数据存储**：␍␊
-        - 用户数据安全存储在Supabase云端␍␊
-        - 分析历史永久保存␍␊
+
     with st.expander("云端功能"):
         st.markdown("""␊
         **数据存储**：␊
@@ -1069,8 +857,6 @@ def render_home_page(analyzer):␊
         - HTTPS安全传输
         - 数据访问控制
         """)
-        - 数据访问控制
-        """)
     
     with st.expander("新增功能模块"):
         st.markdown("""
@@ -1082,7 +868,6 @@ def render_home_page(analyzer):␊
         """)
     
     # 技术架构
-    st.markdown("### 🏗️ 技术架构")
     st.markdown("### 技术架构")
     
     architecture = """
@@ -1111,7 +896,6 @@ def render_home_page(analyzer):␊
     
     # 侧边栏显示实时价格
     with st.sidebar:
-        st.markdown("### 📈 实时价格")
         st.markdown("### 实时价格")
         try:
             price_data = analyzer.fetch_real_time_data(force_refresh=st.session_state.force_refresh)
@@ -1137,9 +921,6 @@ def render_home_page(analyzer):␊
                 st.caption(f"更新时间：{latest_date.strftime('%Y-%m-%d')}")
         except:
             st.warning("无法获取实时价格")
-def render_hedge_page(analyzer):␍␊
-    """渲染套保计算页面"""␍␊
-    st.markdown("<h1>🧮 套保计算器</h1>", unsafe_allow_html=True)
 def render_hedge_page(analyzer):␊
     """渲染套保计算页面"""␊
     st.markdown("<h1>套保计算器</h1>", unsafe_allow_html=True)
@@ -1153,8 +934,6 @@ def render_hedge_page(analyzer):␊
     col_left, col_right = st.columns([1, 2])
     
     with col_left:
-        st.markdown("### ⚙️ 输入参数")
-        st.markdown("---")␍␊
         st.markdown("### 输入参数")
         st.markdown("---")␊
         
@@ -1182,14 +961,7 @@ def render_hedge_page(analyzer):␊
         
         # 套保比例滑块
         default_ratio = user_settings.get('default_hedge_ratio', 0.8)
-        hedge_ratio_percent = st.slider(␍␊
-            "套保比例 (%)",␍␊
-            min_value=0,␍␊
-            max_value=200,
-            value=int(default_ratio * 100),␍␊
-            step=5,␍␊
-            help="计划对冲的价格风险比例，100%表示完全对冲"␍␊
-        )␍␊
+
         hedge_ratio_percent = st.slider(␊
             "套保比例 (%)",␊
             min_value=0,␊
@@ -1202,15 +974,7 @@ def render_hedge_page(analyzer):␊
         hedge_ratio = hedge_ratio_percent / 100
         
         # 高级选项
-        with st.expander("⚙️ 高级选项"):
-            margin_rate = st.slider(␍␊
-                "保证金比例 (%)",␍␊
-                min_value=5,␍␊
-                max_value=30,␍␊
-                value=15,␍␊
-                step=1,␍␊
-                help="期货交易保证金比例"␍␊
-            ) / 100␍␊
+
         with st.expander("高级选项"):
             margin_rate = st.slider(␊
                 "保证金比例 (%)",␊
@@ -1230,52 +994,12 @@ def render_hedge_page(analyzer):␊
                         'default_inventory': float(inventory),
                         'default_hedge_ratio': float(hedge_ratio)
                     }
-                    if analyzer.auth.update_user_settings(st.session_state.user_info['user_id'], new_settings):␍␊
-                        st.success("✅ 默认设置已保存")
+
                     if analyzer.auth.update_user_settings(st.session_state.user_info['user_id'], new_settings):␊
                         st.success("默认设置已保存")
         
         # 操作按钮
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            calc_button = st.button(
-                "🚀 开始计算", 
-                type="primary", 
-                use_container_width=True,
-                help="基于当前参数计算套保方案"
-            )
-        
-        with col_btn2:
-            if st.button("🔄 刷新数据", use_container_width=True):
-                st.session_state.force_refresh = True
-                st.rerun()
-        
-        # 如果点击了计算按钮
-        if calc_button:
-            with st.spinner("正在获取最新数据并计算套保方案..."):
-                fig, suggestions, metrics = analyzer.hedge_calculation(
-                    cost_price, inventory, hedge_ratio, margin_rate
-                )
-                
-                if fig is not None:
-                    # 保存结果到session state
-                    st.session_state.hedge_results = {
-                        'fig': fig,
-                        'suggestions': suggestions,
-                        'metrics': metrics,
-                        'params': {
-                            'cost_price': cost_price,
-                            'inventory': inventory,
-                            'hedge_ratio': hedge_ratio,
-                            'margin_rate': margin_rate
-                        }
-                    }
-                else:
-                    st.error("计算失败，请检查网络连接或稍后重试")
-    
-    with col_right:
-        st.markdown("### 📊 分析结果")
-        st.markdown("---")
+
         auto_update = st.toggle("实时更新", value=True, help="拖动参数后自动刷新图表")
 
         col_btn1, col_btn2 = st.columns(2)
@@ -1326,7 +1050,6 @@ def render_hedge_page(analyzer):␊
             params = results['params']
             
             # 显示数据来源和时间
-            st.info(f"📅 数据时间：{metrics['latest_date'].strftime('%Y-%m-%d')}")
             st.info(f"数据时间：{metrics['latest_date'].strftime('%Y-%m-%d')}")
             
             # 关键指标卡片
@@ -1339,7 +1062,6 @@ def render_hedge_page(analyzer):␊
                 
                 delta_color = "normal" if price_diff >= 0 else "inverse"
                 st.metric(
-                    label="📈 当前市场价格",
                     label="当前市场价格",
                     value=f"{metrics['current_price']:,.0f}",
                     delta=f"{price_diff_pct:+.1f}%",
@@ -1347,12 +1069,11 @@ def render_hedge_page(analyzer):␊
                     help=f"较成本价{price_diff:+,.0f}元/吨"
                 )
             
-            with col_metric2:␍␊
-                actual_ratio = metrics['hedge_contracts_int'] / params['inventory'] * 100 if params['inventory'] > 0 else 0␍␊
+
             with col_metric2:␊
                 actual_ratio = metrics['hedge_contracts_int'] / params['inventory'] * 100 if params['inventory'] > 0 else 0␊
                 st.metric(
-                    label="📦 建议套保手数",
+
                     label="建议套保手数",
                     value=f"{metrics['hedge_contracts_int']}",
                     delta=f"{actual_ratio:.1f}%",
@@ -1361,31 +1082,14 @@ def render_hedge_page(analyzer):␊
             
             with col_metric3:
                 st.metric(
-                    label="💰 所需保证金",
+
                     label="所需保证金",
                     value=f"¥{metrics['total_margin']:,.0f}",
                     help=f"按{params['margin_rate']*100:.0f}%保证金比例"
                 )
             
             # 显示图表
-            st.markdown("#### 📉 盈亏情景分析")
-            st.pyplot(results['fig'])␍␊
-            ␍␊
-            # 详细建议␍␊
-            with st.expander("📋 详细分析报告", expanded=True):
-                st.markdown(results['suggestions'])␍␊
-            ␍␊
-            # 导出功能␍␊
-            st.markdown("#### 💾 导出结果")
-            col_export1, col_export2, col_export3 = st.columns(3)␍␊
-            ␍␊
-            with col_export1:␍␊
-                if st.button("☁️ 保存到云端历史", use_container_width=True, 
-                           help="将分析结果保存到云端历史记录"):␍␊
-                    if 'user_info' in st.session_state:␍␊
-                        st.success("✅ 分析结果已保存到云端历史记录")
-                    else:␍␊
-                        st.warning("请先登录以保存历史记录")␍␊
+           
             st.markdown("#### 盈亏情景分析")
             st.pyplot(results['fig'])␊
             ␊
@@ -1407,11 +1111,6 @@ def render_hedge_page(analyzer):␊
             
             with col_export2:
                 # 生成文本报告
-                report_text = f"""碳酸锂套保分析报告
-生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-用户：{st.session_state.user_info['username'] if 'user_info' in st.session_state else '游客'}
-数据来源：akshare实时数据
-                # 生成文本报告
                 actual_ratio_report = metrics['hedge_contracts_int'] / params['inventory'] * 100 if params['inventory'] > 0 else 0
                 report_text = f"""碳酸锂套保分析报告
 生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
@@ -1430,10 +1129,6 @@ def render_hedge_page(analyzer):␊
 
 === 套保方案 ===
 理论套保手数：{params['inventory'] * params['hedge_ratio']:.2f} 手
-实际套保手数：{metrics['hedge_contracts_int']} 手␍␊
-实际套保比例：{metrics['hedge_contracts_int']/params['inventory']*100:.2f}%
-每手保证金：{metrics['current_price'] * params['margin_rate']:,.2f} 元␍␊
-总保证金要求：{metrics['total_margin']:,.2f} 元␍␊
 实际套保手数：{metrics['hedge_contracts_int']} 手␊
 实际套保比例：{actual_ratio_report:.2f}%
 每手保证金：{metrics['current_price'] * params['margin_rate']:,.2f} 元␊
@@ -1450,14 +1145,7 @@ def render_hedge_page(analyzer):␊
 本分析仅供参考，不构成投资建议。
 """
                 
-                st.download_button(␍␊
-                    label="📄 下载文本报告",
-                    data=report_text,␍␊
-                    file_name=f"套保分析报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",␍␊
-                    mime="text/plain",␍␊
-                    use_container_width=True,␍␊
-                    help="下载完整的分析报告文本文件"␍␊
-                )␍␊
+               
                 st.download_button(␊
                     label="下载文本报告",
                     data=report_text,␊
@@ -1468,8 +1156,7 @@ def render_hedge_page(analyzer):␊
                 )␊
             
             with col_export3:
-                if st.button("🖼️ 保存图表", use_container_width=True,
-                           help="保存分析图表为PNG文件"):␍␊
+             
                 if st.button("保存图表", use_container_width=True,
                            help="保存分析图表为PNG文件"):␊
                     import io
@@ -1477,22 +1164,7 @@ def render_hedge_page(analyzer):␊
                     results['fig'].savefig(buf, format='png', dpi=300, bbox_inches='tight')
                     buf.seek(0)
                     
-                    st.download_button(␍␊
-                        label="📥 下载PNG图表",
-                        data=buf,␍␊
-                        file_name=f"套保分析图表_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",␍␊
-                        mime="image/png",␍␊
-                        use_container_width=True␍␊
-                    )␍␊
-        ␍␊
-        else:␍␊
-            # 如果没有计算结果，显示说明␍␊
-            st.info("👈 请在左侧输入参数并点击'开始计算'")
-            ␍␊
-            # 显示示例␍␊
-            with st.expander("📝 参数说明"):
-                st.markdown("""␍␊
-                **参数解释**：␍␊
+                   
                     st.download_button(␊
                         label="下载PNG图表",
                         data=buf,␊
@@ -1518,11 +1190,7 @@ def render_hedge_page(analyzer):␊
                    - 示例：100吨
                    - 范围：0-10,000吨
                 
-                3. **套保比例**：您希望对冲的价格风险比例
-                   - 0%：完全不套保，承担全部价格风险
-                   - 50%：对冲一半的价格风险
-                   - 100%：完全对冲价格风险
-                   - >100%：过度套保，可能产生额外风险
+               
                 3. **套保比例**：您希望对冲的价格风险比例
                    - 0%：完全不套保，承担全部价格风险
                    - 50%：对冲一半的价格风险
@@ -1540,8 +1208,7 @@ def render_hedge_page(analyzer):␊
                 """)
     
     # 侧边栏信息
-    with st.sidebar:␍␊
-        st.markdown("### 📊 实时市场概况")
+
     with st.sidebar:␊
         st.markdown("### 实时市场概况")
         
@@ -1590,7 +1257,7 @@ def render_hedge_page(analyzer):␊
             with col_stat2:
                 st.metric("30日最低", f"{recent_data['收盘价'].min():,.0f}")
         
-        st.markdown("### 💡 使用提示")
+
         st.markdown("### 使用提示")
         st.markdown("""
         1. **实时数据**：所有计算基于最新市场数据
@@ -1600,9 +1267,7 @@ def render_hedge_page(analyzer):␊
         5. **风险提示**：计算结果仅供参考
         """)
 
-def render_price_page(analyzer):␍␊
-    """渲染价格行情页面"""␍␊
-    st.markdown("<h1>📊 碳酸锂实时价格行情</h1>", unsafe_allow_html=True)
+
 def render_price_page(analyzer):␊
     """渲染价格行情页面"""␊
     st.markdown("<h1>碳酸锂实时价格行情</h1>", unsafe_allow_html=True)
@@ -1627,8 +1292,7 @@ def render_price_page(analyzer):␊
         )
     
     with col_control3:
-        if st.button("🔄 刷新", use_container_width=True, 
-                    help="强制刷新最新数据"):␍␊
+
         if st.button("刷新", use_container_width=True, 
                     help="强制刷新最新数据"):␊
             analyzer.cache_data = {}
@@ -1656,7 +1320,6 @@ def render_price_page(analyzer):␊
     }
     
     days = period_map[period]
-@@ -1555,117 +1655,117 @@ def render_price_page(analyzer):
     if len(display_data) > 20:
         ma20 = display_data['收盘价'].rolling(window=20).mean()
         ax_main.plot(display_data['日期'], ma20, 'r--', 
@@ -1682,7 +1345,6 @@ def render_price_page(analyzer):␊
     
     # 统计信息
     if show_stats:
-        with st.expander("📊 详细统计信息", expanded=True):
         with st.expander("详细统计信息", expanded=True):
             col_stat1, col_stat2 = st.columns(2)
             
@@ -1720,7 +1382,6 @@ def render_price_page(analyzer):␊
                         st.text(f"{key}: {value}")
     
     # 详细数据表格
-    with st.expander("📋 详细数据表格", expanded=False):
     with st.expander("详细数据表格", expanded=False):
         display_data_formatted = display_data.copy()
         display_data_formatted['日期'] = display_data_formatted['日期'].dt.strftime('%Y-%m-%d')
@@ -1750,7 +1411,6 @@ def render_price_page(analyzer):␊
     
     # 数据导出功能
     st.markdown("---")
-    st.markdown("### 📥 数据导出")
     st.markdown("### 数据导出")
     
     col_export1, col_export2, col_export3 = st.columns(3)
@@ -1803,14 +1463,7 @@ def render_price_page(analyzer):␊
 报告生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
         
-        st.download_button(
-            label="生成分析报告",
-            data=report_text,
-            file_name=f"碳酸锂分析报告_{symbol}_{period}_{datetime.now().strftime('%Y%m%d')}.txt",
-            mime="text/plain",
-            use_container_width=True,
-            help="生成并下载详细的价格分析报告"
-        )
+
         st.download_button(
             label="生成分析报告",
             data=report_text,
@@ -2235,9 +1888,7 @@ def render_report_page(analyzer):
         use_container_width=True
     )
 
-def render_history_page(analyzer):␍␊
-    """渲染分析历史页面"""␍␊
-    st.markdown("<h1>📜 分析历史记录</h1>", unsafe_allow_html=True)
+
 def render_history_page(analyzer):␊
     """渲染分析历史页面"""␊
     st.markdown("<h1>分析历史记录</h1>", unsafe_allow_html=True)
@@ -2249,7 +1900,6 @@ def render_history_page(analyzer):␊
     if not history:
         st.info("暂无分析历史记录")
         st.markdown("""
-        ### 💡 开始您的第一次分析
         ### 开始您的第一次分析
         
         1. 前往 **套保计算** 页面
@@ -2282,7 +1932,6 @@ def render_history_page(analyzer):␊
             st.metric("最近分析", latest_str)
     
     # 历史记录列表
-    st.markdown("### 📋 历史记录列表")
     st.markdown("### 历史记录列表")
     
     for i, record in enumerate(history):
@@ -2320,8 +1969,6 @@ def render_history_page(analyzer):␊
             
             with col_record3:
                 analysis_id = record['analysis_id']
-                if st.button("🗑️ 删除", key=f"delete_{analysis_id}", 
-                           help="删除此条记录"):␍␊
                 if st.button("删除", key=f"delete_{analysis_id}", 
                            help="删除此条记录"):␊
                     if analyzer.delete_history_record(analysis_id):
@@ -2332,7 +1979,6 @@ def render_history_page(analyzer):␊
                 
                 # 重新分析按钮
                 if 'input_params' in record and isinstance(record['input_params'], dict):
-                    if st.button("🔄 重新分析", key=f"recalc_{analysis_id}"):
                     if st.button("重新分析", key=f"recalc_{analysis_id}"):
                         st.session_state.recalc_params = record['input_params']
                         st.session_state.current_page = "套保计算"
@@ -2340,7 +1986,6 @@ def render_history_page(analyzer):␊
     
     # 批量操作
     st.markdown("---")
-    st.markdown("### 📦 批量操作")
     st.markdown("### 批量操作")
     
     col_batch1, col_batch2, col_batch3 = st.columns(3)
@@ -2366,7 +2011,6 @@ def render_history_page(analyzer):␊
     
     with col_batch2:
         if st.button("清空所有记录", use_container_width=True, type="secondary"):
-            st.warning("⚠️ 此操作将删除所有历史记录，且不可恢复！")
             st.warning("此操作将删除所有历史记录，且不可恢复！")
             confirm = st.checkbox("我确认要删除所有记录")
             if confirm and st.button("确认删除", type="primary"):
@@ -2381,20 +2025,16 @@ def render_history_page(analyzer):␊
         if st.button("刷新列表", use_container_width=True):
             st.rerun()
 
-def render_settings_page(analyzer):␍␊
-    """渲染账号设置页面"""␍␊
-    st.markdown("<h1>⚙️ 账号设置</h1>", unsafe_allow_html=True)
+
 def render_settings_page(analyzer):␊
     """渲染账号设置页面"""␊
     st.markdown("<h1>账号设置</h1>", unsafe_allow_html=True)
     
     user_info = st.session_state.user_info
     
-    tab1, tab2, tab3, tab4 = st.tabs(["账户信息", "修改密码", "偏好设置", "数据管理"])␍␊
     tab1, tab2, tab3, tab4 = st.tabs(["账户信息", "修改密码", "偏好设置", "数据管理"])␊
     
     with tab1:
-        st.markdown("### 👤 账户信息")
         st.markdown("### 账户信息")
         
         if user_info:
@@ -2408,16 +2048,13 @@ def render_settings_page(analyzer):␊
             with col_info2:
                 if 'settings' in user_info and user_info['settings']:
                     settings = user_info['settings']
-                    st.markdown("**账户状态**：✅ 正常")
                     st.markdown("**账户状态**：正常")
                     st.markdown(f"**会员等级**：{settings.get('subscription_tier', '免费版')}")
                     st.markdown(f"**注册时间**：{settings.get('created_at', '未知')[:10]}")
                 else:
-                    st.markdown("**账户状态**：⚠️ 设置未加载")
                     st.markdown("**账户状态**：设置未加载")
         
         # 账户操作
-        st.markdown("### 🔧 账户操作")
         st.markdown("### 账户操作")
         
         col_action1, col_action2 = st.columns(2)
@@ -2449,7 +2086,6 @@ def render_settings_page(analyzer):␊
                 )
     
     with tab2:
-        st.markdown("### 🔑 修改密码")
         st.markdown("### 修改密码")
         
         old_password = st.text_input("当前密码", type="password", 
@@ -2497,7 +2133,6 @@ def render_settings_page(analyzer):␊
                     st.error(message)
     
     with tab3:
-        st.markdown("### 🎨 偏好设置")
         st.markdown("### 偏好设置")
         
         if 'settings' in user_info and user_info['settings']:
@@ -2522,13 +2157,7 @@ def render_settings_page(analyzer):␊
                 step=1.0
             )
             
-            default_ratio = st.slider(␍␊
-                "默认套保比例 (%)",␍␊
-                min_value=0,␍␊
-                max_value=200,
-                value=int(settings.get('default_hedge_ratio', 0.8) * 100),␍␊
-                step=5␍␊
-            )␍␊
+
             default_ratio = st.slider(␊
                 "默认套保比例 (%)",␊
                 min_value=0,␊
@@ -2555,7 +2184,6 @@ def render_settings_page(analyzer):␊
                 }
                 
                 if analyzer.auth.update_user_settings(user_info['user_id'], new_settings):
-                    st.success("✅ 偏好设置已保存")
                     st.success("偏好设置已保存")
                     st.session_state.user_info['settings'] = new_settings
                 else:
@@ -2564,7 +2192,6 @@ def render_settings_page(analyzer):␊
             st.info("正在加载用户设置...")
     
     with tab4:
-        st.markdown("### 📊 数据管理")
         st.markdown("### 数据管理")
         
         st.markdown("#### 本地缓存")
@@ -2575,7 +2202,6 @@ def render_settings_page(analyzer):␊
                         help="清除本地缓存的价格数据"):
                 analyzer.cache_data = {}
                 analyzer.cache_time = {}
-                st.success("✅ 本地缓存已清除")
                 st.success("本地缓存已清除")
         
         with col_cache2:
@@ -2609,7 +2235,6 @@ def render_settings_page(analyzer):␊
         st.markdown("#### 账户操作")
         
         if st.button("注销账户", type="secondary", use_container_width=True):
-            st.warning("⚠️ 此操作将删除您的所有数据，且不可恢复！")
             st.warning("此操作将删除您的所有数据，且不可恢复！")
             confirm = st.checkbox("我确认要注销账户")
             if confirm:
@@ -2621,10 +2246,6 @@ def render_settings_page(analyzer):␊
     col_logout1, col_logout2, col_logout3 = st.columns([1, 2, 1])
     
     with col_logout2:
-        if st.button("🚪 退出登录", type="primary", use_container_width=True):
-            st.session_state.authenticated = False␍␊
-            st.session_state.user_info = None␍␊
-            st.success("已退出登录")␍␊
         if st.button("退出登录", type="primary", use_container_width=True):
             st.session_state.authenticated = False␊
             st.session_state.user_info = None␊
@@ -2647,4 +2268,5 @@ if __name__ == "__main__":
         st.error(f"应用程序运行出错: {str(e)}")
         st.code(traceback.format_exc())
         st.info("请检查：\n1. 网络连接\n2. 环境变量配置\n3. 依赖包安装")
+
 
