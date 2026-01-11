@@ -79,6 +79,26 @@ class CloudUserAuth:
     def __init__(self):
         self.supabase = supabase if HAS_SUPABASE else None
 
+
+@staticmethod
+def _normalize_result(ret, default_ok=False):
+    """Normalize backend returns to (ok, payload).
+
+    Many helper methods may return:
+    - (ok, payload)
+    - (ok, payload, message, ...)
+    - dict payload
+    - string message
+    """
+    if isinstance(ret, tuple):
+        if len(ret) >= 2:
+            return bool(ret[0]), ret[1]
+        if len(ret) == 1:
+            return bool(ret[0]), None
+        return default_ok, None
+    # If backend returns dict/string directly, treat as failure unless default_ok True
+    return default_ok, ret
+
     def register(self, username: str, password: str, email: str):
         """注册新用户"""
         if not self.supabase:
@@ -98,10 +118,10 @@ class CloudUserAuth:
         try:
             # 优先使用 supabase 管理器的 create_user
             if hasattr(self.supabase, "create_user"):
-                return self.supabase.create_user(username, password, email)
+                return self._normalize_result(self.supabase.create_user(username, password, email), default_ok=False)
             # 兼容可能的命名
             if hasattr(self.supabase, "register_user"):
-                return self.supabase.register_user(username, password, email)
+                return self._normalize_result(self.supabase.register_user(username, password, email), default_ok=False)
             return False, "Supabase管理器缺少 create_user/register_user 方法"
         except Exception as exc:
             return False, f"注册失败：{exc}"
@@ -121,11 +141,11 @@ class CloudUserAuth:
             for fn_name in ["authenticate_user", "login", "sign_in", "signin", "auth_user"]:
                 fn = getattr(self.supabase, fn_name, None)
                 if callable(fn):
-                    return fn(username, password)
+                    return self._normalize_result(fn(username, password), default_ok=False)
             # 某些实现可能只支持 email 登录：尝试用 username 当 email
             fn = getattr(self.supabase, "sign_in_with_password", None)
             if callable(fn):
-                return fn(username, password)
+                return self._normalize_result(fn(username, password), default_ok=False)
             return False, {"message": "Supabase管理器缺少登录方法（authenticate_user/login）"}
         except Exception as exc:
             return False, {"message": f"登录失败：{exc}"}
@@ -592,7 +612,7 @@ def main():
         font-size: 2.2rem;
         font-weight: 600;
         color: #1c1c1e;
-        text-align: left;
+        text-align: center;
         margin-bottom: 0.75rem;
     }
     .cloud-badge {
@@ -629,7 +649,21 @@ def main():
         transform: translateY(-1px);
         box-shadow: 0 6px 14px rgba(0,0,0,0.08);
     }
-    </style>
+    
+    /* Ensure button text is always visible (especially primary buttons) */
+    .stButton > button { color: #1c1c1e; }
+    button[kind="primary"], button[data-testid="baseButton-primary"] {
+        color: #ffffff !important;
+        background-color: #ff3b30 !important;
+        border: none !important;
+        font-weight: 600 !important;
+    }
+    button[kind="primary"]:hover, button[data-testid="baseButton-primary"]:hover {
+        color: #ffffff !important;
+        filter: brightness(0.95);
+    }
+
+</style>
     """, unsafe_allow_html=True)
     
     # 检查Supabase连接状态
@@ -661,7 +695,7 @@ def main():
 def render_auth_page(analyzer):
     """渲染登录/注册页面"""
     st.markdown('<h1 class="main-header">碳酸锂期货套保分析系统</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align:left;color:#6e6e73;font-size:1.05rem;">云端存储 · 实时数据 · 专业分析</p>', unsafe_allow_html=True)
+    st.markdown('<p style="text-align:center;color:#6e6e73;font-size:1.05rem;">云端存储 · 实时数据 · 专业分析</p>', unsafe_allow_html=True)
 
     # 忘记密码弹窗状态
     if "show_forgot_password" not in st.session_state:
@@ -730,6 +764,8 @@ def render_auth_page(analyzer):
                 else:
                     with st.spinner("正在注册..."):
                         ok, msg = analyzer.auth.register(new_username, new_password, new_email)
+                    if isinstance(msg, dict):
+                        msg = msg.get('message') or msg.get('msg') or str(msg)
                     if ok:
                         st.success(msg if isinstance(msg, str) else "注册成功")
                         # 自动登录
