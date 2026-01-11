@@ -72,35 +72,27 @@ class CloudUserAuth:
     """云端用户认证管理器
 
     说明：
-    - 认证与数据存储通过 utils/supabase_client.py 中的 Supabase 管理器完成。
-    - 为兼容不同实现，这里对可能的方法名做了兜底（authenticate_user/login/sign_in 等）。
+    - 认证与数据存储通过 utils/supabase_client.py 中的 Supabase 管理器完成（若存在）。
+    - 由于不同版本/封装返回值形态不同，本类统一将所有返回规范化为 (ok, payload)。
     """
 
     def __init__(self):
         self.supabase = supabase if HAS_SUPABASE else None
 
-
-@staticmethod
-def _normalize_result(ret, default_ok=False):
-    """Normalize backend returns to (ok, payload).
-
-    Many helper methods may return:
-    - (ok, payload)
-    - (ok, payload, message, ...)
-    - dict payload
-    - string message
-    """
-    if isinstance(ret, tuple):
-        if len(ret) >= 2:
-            return bool(ret[0]), ret[1]
-        if len(ret) == 1:
-            return bool(ret[0]), None
-        return default_ok, None
-    # If backend returns dict/string directly, treat as failure unless default_ok True
-    return default_ok, ret
+    @staticmethod
+    def _normalize_result(ret, default_ok: bool = False):
+        """Normalize backend returns to (ok, payload)."""
+        if isinstance(ret, tuple):
+            if len(ret) >= 2:
+                return bool(ret[0]), ret[1]
+            if len(ret) == 1:
+                return bool(ret[0]), None
+            return default_ok, None
+        # Some helpers may return dict/string directly
+        return default_ok, ret
 
     def register(self, username: str, password: str, email: str):
-        """注册新用户"""
+        """注册用户。返回 (ok, payload/message)"""
         if not self.supabase:
             return False, "数据库连接失败，请检查配置"
 
@@ -110,71 +102,77 @@ def _normalize_result(ret, default_ok=False):
 
         if len(username) < 3:
             return False, "用户名至少3个字符"
+        if "@" not in email or "." not in email:
+            return False, "请输入有效的邮箱地址"
         if len(password) < 6:
-            return False, "密码至少6个字符"
-        if "@" not in email:
-            return False, "请输入有效的邮箱地址"
+            return False, "密码长度至少6位"
 
-        try:
-            # 优先使用 supabase 管理器的 create_user
-            if hasattr(self.supabase, "create_user"):
-                return self._normalize_result(self.supabase.create_user(username, password, email), default_ok=False)
-            # 兼容可能的命名
-            if hasattr(self.supabase, "register_user"):
-                return self._normalize_result(self.supabase.register_user(username, password, email), default_ok=False)
-            return False, "Supabase管理器缺少 create_user/register_user 方法"
-        except Exception as exc:
-            return False, f"注册失败：{exc}"
-
-    def login(self, username: str, password: str):
-        """用户登录"""
-        if not self.supabase:
-            return False, {"message": "数据库连接失败，请检查配置"}
-
-        username = (username or "").strip()
-        password = password or ""
-        if not username or not password:
-            return False, {"message": "请输入用户名和密码"}
-
-        try:
-            # 尝试多种可能的登录方法名
-            for fn_name in ["authenticate_user", "login", "sign_in", "signin", "auth_user"]:
-                fn = getattr(self.supabase, fn_name, None)
-                if callable(fn):
-                    return self._normalize_result(fn(username, password), default_ok=False)
-            # 某些实现可能只支持 email 登录：尝试用 username 当 email
-            fn = getattr(self.supabase, "sign_in_with_password", None)
+        # Prefer project-specific helper if available
+        for fn_name in ["create_user", "register", "sign_up", "signup"]:
+            fn = getattr(self.supabase, fn_name, None)
             if callable(fn):
-                return self._normalize_result(fn(username, password), default_ok=False)
-            return False, {"message": "Supabase管理器缺少登录方法（authenticate_user/login）"}
-        except Exception as exc:
-            return False, {"message": f"登录失败：{exc}"}
+                try:
+                    return self._normalize_result(fn(username, password, email), default_ok=True)
+                except TypeError:
+                    # Some SDK use (email, password) only
+                    try:
+                        return self._normalize_result(fn(email, password), default_ok=True)
+                    except Exception as e:
+                        return False, f"注册失败: {e}"
+                except Exception as e:
+                    return False, f"注册失败: {e}"
 
-    def logout(self):
-        """退出登录"""
-        st.session_state.authenticated = False
-        st.session_state.user_info = None
+        # Supabase python client often uses supabase.auth.sign_up(...)
+        auth = getattr(self.supabase, "auth", None)
+        if auth and hasattr(auth, "sign_up"):
+            try:
+                return self._normalize_result(auth.sign_up({"email": email, "password": password}), default_ok=True)
+            except Exception as e:
+                return False, f"注册失败: {e}"
 
-    def request_password_reset(self, email: str):
-        """请求重置密码（如果后端支持邮件验证码流程）"""
+        return False, "后端未提供注册接口"
+
+    def login(self, username_or_email: str, password: str):
+        """登录。返回 (ok, payload)"""
         if not self.supabase:
-            return False, "数据库连接失败"
-        email = (email or "").strip()
-        if "@" not in email:
-            return False, "请输入有效的邮箱地址"
+            return False, "数据库连接失败，请检查配置"
 
-        try:
-            for fn_name in ["request_password_reset", "send_reset_email", "forgot_password"]:
-                fn = getattr(self.supabase, fn_name, None)
-                if callable(fn):
-                    return fn(email)
-            # 若后端没有邮件流程，提示用户联系管理员
-            return False, "当前后端未配置邮件找回流程，请联系管理员或在设置页修改密码"
-        except Exception as exc:
-            return False, f"操作失败：{exc}"
+        username_or_email = (username_or_email or "").strip()
+        password = password or ""
+        if not username_or_email:
+            return False, "请输入用户名或邮箱"
+        if not password:
+            return False, "请输入密码"
 
-    def reset_password(self, username_or_email: str, new_password: str):
-        """直接重置密码（需要后端允许）"""
+        # Prefer project helper
+        for fn_name in ["authenticate_user", "login", "sign_in", "sign_in_with_password"]:
+            fn = getattr(self.supabase, fn_name, None)
+            if callable(fn):
+                try:
+                    if fn_name == "sign_in_with_password":
+                        return self._normalize_result(fn({"email": username_or_email, "password": password}), default_ok=True)
+                    return self._normalize_result(fn(username_or_email, password), default_ok=True)
+                except TypeError:
+                    # Sometimes accepts (email, password) only
+                    try:
+                        return self._normalize_result(fn(username_or_email, password), default_ok=True)
+                    except Exception as e:
+                        return False, f"登录失败: {e}"
+                except Exception as e:
+                    return False, f"登录失败: {e}"
+
+        # Supabase auth style
+        auth = getattr(self.supabase, "auth", None)
+        if auth and hasattr(auth, "sign_in_with_password"):
+            try:
+                return self._normalize_result(auth.sign_in_with_password({"email": username_or_email, "password": password}), default_ok=True)
+            except Exception as e:
+                return False, f"登录失败: {e}"
+
+        return False, "后端未提供登录接口"
+
+    def change_password(self, username_or_email: str, old_password: str, new_password: str):
+        """修改密码：先验证旧密码再改新密码（若后端支持）。"""
         if not self.supabase:
             return False, "数据库连接失败"
 
@@ -182,28 +180,75 @@ def _normalize_result(ret, default_ok=False):
         if len(new_password) < 6:
             return False, "新密码至少6位"
 
-        try:
-            # 你现有的 supabase 管理器里已有 update_user_password
-            if hasattr(self.supabase, "update_user_password"):
-                return self.supabase.update_user_password(username_or_email, new_password)
-            for fn_name in ["reset_password", "set_password"]:
-                fn = getattr(self.supabase, fn_name, None)
-                if callable(fn):
-                    return fn(username_or_email, new_password)
-            return False, "Supabase管理器缺少 update_user_password/reset_password 方法"
-        except Exception as exc:
-            return False, f"重置密码失败：{exc}"
+        # If helper exists
+        for fn_name in ["change_password", "update_password", "update_user_password"]:
+            fn = getattr(self.supabase, fn_name, None)
+            if callable(fn):
+                try:
+                    return self._normalize_result(fn(username_or_email, old_password, new_password), default_ok=True)
+                except TypeError:
+                    try:
+                        return self._normalize_result(fn(username_or_email, new_password), default_ok=True)
+                    except Exception as e:
+                        return False, f"修改密码失败: {e}"
+                except Exception as e:
+                    return False, f"修改密码失败: {e}"
 
-    def get_user_settings(self, user_id):
+        return False, "后端未提供改密接口"
+
+    def generate_reset_code(self, username_or_email: str):
+        """生成/发送重置码（如有邮件验证）。"""
         if not self.supabase:
-            return None
-        return self.supabase.get_user_settings(user_id)
+            return False, "数据库连接失败"
 
-    def update_user_settings(self, user_id, settings):
+        for fn_name in ["generate_reset_code", "send_reset_code", "send_password_reset_email", "reset_password_for_email"]:
+            fn = getattr(self.supabase, fn_name, None)
+            if callable(fn):
+                try:
+                    return self._normalize_result(fn(username_or_email), default_ok=True)
+                except Exception as e:
+                    return False, f"发送重置码失败: {e}"
+
+        auth = getattr(self.supabase, "auth", None)
+        if auth and hasattr(auth, "reset_password_for_email"):
+            try:
+                return self._normalize_result(auth.reset_password_for_email(username_or_email), default_ok=True)
+            except Exception as e:
+                return False, f"发送重置码失败: {e}"
+
+        return False, "后端未提供重置码接口"
+
+    def reset_password(self, username_or_email: str, new_password: str):
+        """直接重置密码（需要后端允许）。"""
         if not self.supabase:
-            return False
-        return self.supabase.update_user_settings(user_id, settings)
+            return False, "数据库连接失败"
 
+        new_password = new_password or ""
+        if len(new_password) < 6:
+            return False, "新密码至少6位"
+
+        for fn_name in ["reset_password", "set_password", "update_user_password", "update_password"]:
+            fn = getattr(self.supabase, fn_name, None)
+            if callable(fn):
+                try:
+                    return self._normalize_result(fn(username_or_email, new_password), default_ok=True)
+                except Exception as e:
+                    return False, f"重置密码失败: {e}"
+
+        return False, "后端未提供重置密码接口"
+
+    def update_user_settings(self, user_id: str, settings: dict):
+        """更新用户设置（可选）。"""
+        if not self.supabase:
+            return False, "数据库连接失败"
+        for fn_name in ["update_user_settings", "update_settings"]:
+            fn = getattr(self.supabase, fn_name, None)
+            if callable(fn):
+                try:
+                    return self._normalize_result(fn(user_id, settings), default_ok=True)
+                except Exception as e:
+                    return False, f"更新设置失败: {e}"
+        return False, "后端未提供设置更新接口"
 class CloudLithiumAnalyzer:
     """云端碳酸锂数据分析器"""
     
@@ -2443,5 +2488,4 @@ if __name__ == "__main__":
         st.error(f"应用程序运行出错: {str(e)}")
         st.code(traceback.format_exc())
         st.info("请检查：\n1. 网络连接\n2. 环境变量配置\n3. 依赖包安装")
-
 
