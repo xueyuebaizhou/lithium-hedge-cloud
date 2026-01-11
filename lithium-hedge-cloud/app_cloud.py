@@ -69,49 +69,120 @@ matplotlib.rcParams['axes.unicode_minus'] = False
 # ============================================================================
 
 class CloudUserAuth:
-    """云端用户认证管理器"""
-    
+    """云端用户认证管理器
+
+    说明：
+    - 认证与数据存储通过 utils/supabase_client.py 中的 Supabase 管理器完成。
+    - 为兼容不同实现，这里对可能的方法名做了兜底（authenticate_user/login/sign_in 等）。
+    """
+
     def __init__(self):
         self.supabase = supabase if HAS_SUPABASE else None
-    
-    def register(self, username, password, email):
+
+    def register(self, username: str, password: str, email: str):
         """注册新用户"""
         if not self.supabase:
             return False, "数据库连接失败，请检查配置"
-        
-        # 验证输入
+
+        username = (username or "").strip()
+        email = (email or "").strip()
+        password = password or ""
+
         if len(username) < 3:
             return False, "用户名至少3个字符"
         if len(password) < 6:
             return False, "密码至少6个字符"
-        if '@' not in email:
+        if "@" not in email:
             return False, "请输入有效的邮箱地址"
-        
-        result = self.supabase.create_user(username, password, email)
-        success, result = self.login(username, old_password)
-        if not success:
-            return False, "原密码错误"
-        
-        # 更新密码
-        if self.supabase.update_user_password(username, new_password):
-            return True, "密码修改成功"
-        return False, "密码修改失败"
-    
+
+        try:
+            # 优先使用 supabase 管理器的 create_user
+            if hasattr(self.supabase, "create_user"):
+                return self.supabase.create_user(username, password, email)
+            # 兼容可能的命名
+            if hasattr(self.supabase, "register_user"):
+                return self.supabase.register_user(username, password, email)
+            return False, "Supabase管理器缺少 create_user/register_user 方法"
+        except Exception as exc:
+            return False, f"注册失败：{exc}"
+
+    def login(self, username: str, password: str):
+        """用户登录"""
+        if not self.supabase:
+            return False, {"message": "数据库连接失败，请检查配置"}
+
+        username = (username or "").strip()
+        password = password or ""
+        if not username or not password:
+            return False, {"message": "请输入用户名和密码"}
+
+        try:
+            # 尝试多种可能的登录方法名
+            for fn_name in ["authenticate_user", "login", "sign_in", "signin", "auth_user"]:
+                fn = getattr(self.supabase, fn_name, None)
+                if callable(fn):
+                    return fn(username, password)
+            # 某些实现可能只支持 email 登录：尝试用 username 当 email
+            fn = getattr(self.supabase, "sign_in_with_password", None)
+            if callable(fn):
+                return fn(username, password)
+            return False, {"message": "Supabase管理器缺少登录方法（authenticate_user/login）"}
+        except Exception as exc:
+            return False, {"message": f"登录失败：{exc}"}
+
+    def logout(self):
+        """退出登录"""
+        st.session_state.authenticated = False
+        st.session_state.user_info = None
+
+    def request_password_reset(self, email: str):
+        """请求重置密码（如果后端支持邮件验证码流程）"""
+        if not self.supabase:
+            return False, "数据库连接失败"
+        email = (email or "").strip()
+        if "@" not in email:
+            return False, "请输入有效的邮箱地址"
+
+        try:
+            for fn_name in ["request_password_reset", "send_reset_email", "forgot_password"]:
+                fn = getattr(self.supabase, fn_name, None)
+                if callable(fn):
+                    return fn(email)
+            # 若后端没有邮件流程，提示用户联系管理员
+            return False, "当前后端未配置邮件找回流程，请联系管理员或在设置页修改密码"
+        except Exception as exc:
+            return False, f"操作失败：{exc}"
+
+    def reset_password(self, username_or_email: str, new_password: str):
+        """直接重置密码（需要后端允许）"""
+        if not self.supabase:
+            return False, "数据库连接失败"
+
+        new_password = new_password or ""
+        if len(new_password) < 6:
+            return False, "新密码至少6位"
+
+        try:
+            # 你现有的 supabase 管理器里已有 update_user_password
+            if hasattr(self.supabase, "update_user_password"):
+                return self.supabase.update_user_password(username_or_email, new_password)
+            for fn_name in ["reset_password", "set_password"]:
+                fn = getattr(self.supabase, fn_name, None)
+                if callable(fn):
+                    return fn(username_or_email, new_password)
+            return False, "Supabase管理器缺少 update_user_password/reset_password 方法"
+        except Exception as exc:
+            return False, f"重置密码失败：{exc}"
+
     def get_user_settings(self, user_id):
-        """获取用户设置"""
         if not self.supabase:
             return None
         return self.supabase.get_user_settings(user_id)
-    
+
     def update_user_settings(self, user_id, settings):
-        """更新用户设置"""
         if not self.supabase:
             return False
         return self.supabase.update_user_settings(user_id, settings)
-
-# ============================================================================
-# 数据分析器（云端版）
-# ============================================================================
 
 class CloudLithiumAnalyzer:
     """云端碳酸锂数据分析器"""
@@ -310,75 +381,133 @@ class CloudLithiumAnalyzer:
         }
     
     def get_price_chart(self, period='1y'):
-        """获取价格走势图"""
+        """获取价格走势图（用于行情页）"""
         price_data = self.fetch_real_time_data()
-        
-        if price_data.empty:
+
+        if price_data is None or price_data.empty:
             st.error("无法获取价格数据")
             return None, "数据获取失败"
-        
+
+        # 标准化日期列
+        if "日期" in price_data.columns:
+            price_data = price_data.sort_values("日期").copy()
+        else:
+            # 兼容没有日期列的情况
+            price_data = price_data.reset_index().rename(columns={"index": "日期"}).sort_values("日期")
+
         # 根据周期筛选数据
-        if period == '1m':
+        period = (period or "1y").lower()
+        if period in ["1m", "30d"]:
             display_data = price_data.tail(30)
-            title_suffix = '近30日'
-        elif period == '3m':
-            ax.annotate(f'{max_price:.0f}',xy=(max_date, max_price),
-                        xytext=(max_date, max_price * 1.02),
-                        arrowprops=dict(arrowstyle='->', color='red', lw=1.5),
-                        fontsize=11, color='red', ha='center',
-                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
-            ax.annotate(f'{min_price:,.0f}', xy=(min_date, min_price),
-                       xytext=(min_date, min_price * 0.98),
-                       arrowprops=dict(arrowstyle='->', color='green', lw=1.5),
-                       fontsize=11, color='green', ha='center',
-                       bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
-        
-        ax.set_title(f'碳酸锂期货{title_suffix}价格走势图', 
-                    fontsize=18, fontweight='bold', pad=20)
-        ax.set_xlabel('日期', fontsize=14)
-        ax.set_ylabel('价格 (元/吨)', fontsize=14)
-        ax.grid(True, alpha=0.3, linestyle='--')
-        ax.legend(fontsize=12, loc='upper left')
-        
-        # 格式化y轴
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, pos: f'{x:,.0f}'))
-        
+            title_suffix = "近30日"
+        elif period in ["3m", "90d"]:
+            display_data = price_data.tail(90)
+            title_suffix = "近3个月"
+        elif period in ["6m", "180d"]:
+            display_data = price_data.tail(180)
+            title_suffix = "近6个月"
+        elif period in ["1y", "365d", "12m"]:
+            display_data = price_data.tail(365)
+            title_suffix = "近1年"
+        else:
+            display_data = price_data.copy()
+            title_suffix = "全历史"
+
+        # 选择价格列（优先收盘价）
+        price_col = None
+        for c in ["收盘价", "收盘", "close", "Close", "价格", "price"]:
+            if c in display_data.columns:
+                price_col = c
+                break
+        if price_col is None:
+            st.error("价格数据列缺失（未找到收盘价/价格列）")
+            return None, "价格数据列缺失"
+
+        # 创建图表
+        fig, ax = plt.subplots(figsize=(10, 4.8))
+        ax.plot(display_data["日期"], display_data[price_col], linewidth=2.2, label="价格")
+
+        # 标注最高/最低点
+        try:
+            max_idx = display_data[price_col].idxmax()
+            min_idx = display_data[price_col].idxmin()
+            max_row = display_data.loc[max_idx]
+            min_row = display_data.loc[min_idx]
+
+            ax.annotate(
+                f"{max_row[price_col]:,.0f}",
+                xy=(max_row["日期"], max_row[price_col]),
+                xytext=(max_row["日期"], max_row[price_col] * 1.02),
+                arrowprops=dict(arrowstyle="->", lw=1.4),
+                fontsize=11,
+                ha="center",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.85),
+            )
+            ax.annotate(
+                f"{min_row[price_col]:,.0f}",
+                xy=(min_row["日期"], min_row[price_col]),
+                xytext=(min_row["日期"], min_row[price_col] * 0.98),
+                arrowprops=dict(arrowstyle="->", lw=1.4),
+                fontsize=11,
+                ha="center",
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.85),
+            )
+        except Exception:
+            # 标注不是关键功能，忽略标注失败
+            pass
+
+        ax.set_title(f"碳酸锂期货 {title_suffix} 价格走势图", fontsize=16, fontweight="bold", pad=16)
+        ax.set_xlabel("日期", fontsize=12)
+        ax.set_ylabel("价格 (元/吨)", fontsize=12)
+        ax.grid(True, alpha=0.25, linestyle="--")
+
+        # y轴格式化
+        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, pos: f"{x:,.0f}"))
+
         plt.xticks(rotation=30)
         plt.tight_layout()
-        
+
         # 生成统计信息
         stats_text = []
-        stats_text.append(f"### {title_suffix}市场统计")
-        stats_text.append(f"**数据期间**：{display_data['日期'].min().strftime('%Y-%m-%d')} 至 {display_data['日期'].max().strftime('%Y-%m-%d')}")
-        stats_text.append(f"**最新价格**：{display_data['收盘价'].iloc[-1]:,.2f} 元/吨")
-        stats_text.append(f"**期间最高**：{display_data['收盘价'].max():,.2f} 元/吨")
-        stats_text.append(f"**期间最低**：{display_data['收盘价'].min():,.2f} 元/吨")
-        stats_text.append(f"**平均价格**：{display_data['收盘价'].mean():,.2f} 元/吨")
-        stats_text.append(f"**价格标准差**：{display_data['收盘价'].std():,.2f} 元/吨")
-        
-        if '涨跌幅' in display_data.columns:
-            avg_return = display_data['涨跌幅'].mean()
-            up_days = (display_data['涨跌幅'] > 0).sum()
-            down_days = (display_data['涨跌幅'] < 0).sum()
-            flat_days = (display_data['涨跌幅'] == 0).sum()
-            max_up = display_data['涨跌幅'].max()
-            max_down = display_data['涨跌幅'].min()
-            
+        try:
+            start_date = pd.to_datetime(display_data["日期"].min()).strftime("%Y-%m-%d")
+            end_date = pd.to_datetime(display_data["日期"].max()).strftime("%Y-%m-%d")
+        except Exception:
+            start_date = str(display_data["日期"].min())
+            end_date = str(display_data["日期"].max())
+
+        stats_text.append(f"### {title_suffix} 市场统计")
+        stats_text.append(f"**数据期间**：{start_date} 至 {end_date}")
+        stats_text.append(f"**最新价格**：{display_data[price_col].iloc[-1]:,.2f} 元/吨")
+        stats_text.append(f"**期间最高**：{display_data[price_col].max():,.2f} 元/吨")
+        stats_text.append(f"**期间最低**：{display_data[price_col].min():,.2f} 元/吨")
+        stats_text.append(f"**平均价格**：{display_data[price_col].mean():,.2f} 元/吨")
+        stats_text.append(f"**价格标准差**：{display_data[price_col].std():,.2f} 元/吨")
+
+        # 日收益统计（如果可计算）
+        if len(display_data) >= 2:
+            returns = display_data[price_col].pct_change() * 100
+            avg_return = returns.mean()
+            up_days = int((returns > 0).sum())
+            down_days = int((returns < 0).sum())
+            flat_days = int((returns == 0).sum())
+            max_up = returns.max()
+            max_down = returns.min()
             stats_text.append(f"**平均日涨跌**：{avg_return:.2f}%")
             stats_text.append(f"**上涨天数**：{up_days} 天 ({up_days/len(display_data)*100:.1f}%)")
             stats_text.append(f"**下跌天数**：{down_days} 天 ({down_days/len(display_data)*100:.1f}%)")
             stats_text.append(f"**平盘天数**：{flat_days} 天 ({flat_days/len(display_data)*100:.1f}%)")
             stats_text.append(f"**最大单日涨幅**：{max_up:.2f}%")
             stats_text.append(f"**最大单日跌幅**：{max_down:.2f}%")
-        
-        if '成交量' in display_data.columns:
-            avg_volume = display_data['成交量'].mean()
-            total_volume = display_data['成交量'].sum()
+
+        if "成交量" in display_data.columns:
+            avg_volume = display_data["成交量"].mean()
+            total_volume = display_data["成交量"].sum()
             stats_text.append(f"**日均成交量**：{avg_volume:,.0f} 手")
             stats_text.append(f"**总成交量**：{total_volume:,.0f} 手")
-        
+
         return fig, "\n".join(stats_text)
-    
+
     def get_user_history(self, limit=20):
         """获取用户分析历史"""
         if not self.supabase or 'user_info' not in st.session_state:
@@ -532,96 +661,99 @@ def main():
 def render_auth_page(analyzer):
     """渲染登录/注册页面"""
     st.markdown('<h1 class="main-header">碳酸锂期货套保分析系统</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align:left;color:#6e6e73;font-size:1.1rem;">云端存储 · 实时数据 · 专业分析</p>', unsafe_allow_html=True)
-    
-    tab1, tab2 = st.tabs(["用户登录", "新用户注册"])
-    
-    with tab1:
-        with st.container():
-            col_left, col_center, col_right = st.columns([1, 2, 1])
-            
-            with col_center:
-                st.markdown("### 用户登录")
-                
-                username = st.text_input("用户名", placeholder="请输入用户名")
-                password = st.text_input("密码", type="password", placeholder="请输入密码")
-                
-                col_btn1, col_btn2 = st.columns(2)
-                with col_btn1:
-                    if st.button("登录", type="primary", use_container_width=True):
-                        if username and password:
-                            with st.spinner("正在验证..."):
-                                success, result = analyzer.auth.login(username, password)
-                                if success:
-                                    st.session_state.authenticated = True
-                                    st.session_state.user_info = {
-                                        'user_id': result['user_id'],
-                                        'username': result['username'],
-                                        'email': result['email'],
-                                        'settings': result.get('settings', {})
-                                    }
-                                    st.success("登录成功！")
-                                    st.rerun()
-                                else:
-                                    st.error(result.get('message', '登录失败'))
-                        else:
-                            st.error("请输入用户名和密码")
-                
-                with col_btn2:
-                    if st.button("忘记密码", use_container_width=True):
-                        st.session_state.show_forgot_password = True
-                        st.rerun()
-                
-                # 演示账号（可选）
-                with st.expander("快速体验"):
-                    st.markdown("""
-                    **演示账号**：
-                    - 用户名：demo_user
-                    - 密码：demo123
-                    
-                    **或直接注册新账号**
-                    """)
-    
-    with tab2:
-        with st.container():
-            col_left, col_center, col_right = st.columns([1, 2, 1])
-            
-            with col_center:
-                st.markdown("### 新用户注册")
-                
-                new_username = st.text_input("用户名", key="reg_username", 
-                                           placeholder="至少3个字符")
-                new_email = st.text_input("邮箱", key="reg_email", 
-                                        placeholder="用于找回密码")
-                new_password = st.text_input("密码", type="password", 
-                                           key="reg_password1", 
-                                           placeholder="至少6个字符")
-                confirm_password = st.text_input("确认密码", type="password", 
-                                               key="reg_password2")
-                
+    st.markdown('<p style="text-align:left;color:#6e6e73;font-size:1.05rem;">云端存储 · 实时数据 · 专业分析</p>', unsafe_allow_html=True)
 
-                        st.error("两次输入的密码不一致")
-                    elif len(new_password) < 6:
-                        st.error("密码长度至少6位")
+    # 忘记密码弹窗状态
+    if "show_forgot_password" not in st.session_state:
+        st.session_state.show_forgot_password = False
+
+    tab_login, tab_register = st.tabs(["用户登录", "新用户注册"])
+
+    with tab_login:
+        col_left, col_center, col_right = st.columns([1, 2, 1])
+        with col_center:
+            st.markdown("### 用户登录")
+            username = st.text_input("用户名", placeholder="请输入用户名", key="login_username")
+            password = st.text_input("密码", type="password", placeholder="请输入密码", key="login_password")
+
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("登录", type="primary", use_container_width=True):
+                    with st.spinner("正在验证..."):
+                        success, result = analyzer.auth.login(username, password)
+                    if success:
+                        st.session_state.authenticated = True
+                        # result 可能是 dict 或字符串
+                        if isinstance(result, dict):
+                            st.session_state.user_info = {
+                                "user_id": result.get("user_id") or result.get("id"),
+                                "username": result.get("username") or username,
+                                "email": result.get("email"),
+                                "settings": result.get("settings", {}),
+                            }
+                        else:
+                            st.session_state.user_info = {"username": username}
+                        st.success("登录成功！")
+                        st.rerun()
                     else:
-                        with st.spinner("正在注册..."):
-                            success, message = analyzer.auth.register(new_username, new_password, new_email)
-                            if success:
-                                st.success(message)
-                                # 自动登录
-                                success, result = analyzer.auth.login(new_username, new_password)
-                                if success:
-                                    st.session_state.authenticated = True
-                                    st.session_state.user_info = {
-                                        'user_id': result['user_id'],
-                                        'username': result['username'],
-                                        'email': result['email'],
-                                        'settings': result.get('settings', {})
-                                    }
-                                    st.success("自动登录成功！")
-                                    st.rerun()
+                        msg = result.get("message") if isinstance(result, dict) else str(result)
+                        st.error(msg or "登录失败")
+
+            with col_btn2:
+                if st.button("忘记密码", use_container_width=True):
+                    st.session_state.show_forgot_password = True
+                    st.rerun()
+
+            with st.expander("快速体验"):
+                st.markdown("""**演示账号**（如已在数据库中创建）：  
+- 用户名：demo_user  
+- 密码：demo123  
+
+也可以直接注册新账号。""")
+
+    with tab_register:
+        col_left, col_center, col_right = st.columns([1, 2, 1])
+        with col_center:
+            st.markdown("### 新用户注册")
+            new_username = st.text_input("用户名", key="reg_username", placeholder="至少3个字符")
+            new_email = st.text_input("邮箱", key="reg_email", placeholder="用于找回密码")
+            new_password = st.text_input("密码", type="password", key="reg_password1", placeholder="至少6个字符")
+            confirm_password = st.text_input("确认密码", type="password", key="reg_password2")
+
+            if st.button("注册并登录", type="primary", use_container_width=True):
+                if not new_username or not new_email or not new_password:
+                    st.error("请完整填写注册信息")
+                elif new_password != confirm_password:
+                    st.error("两次输入的密码不一致")
+                elif len(new_password) < 6:
+                    st.error("密码长度至少6位")
+                else:
+                    with st.spinner("正在注册..."):
+                        ok, msg = analyzer.auth.register(new_username, new_password, new_email)
+                    if ok:
+                        st.success(msg if isinstance(msg, str) else "注册成功")
+                        # 自动登录
+                        with st.spinner("正在登录..."):
+                            success, result = analyzer.auth.login(new_username, new_password)
+                        if success:
+                            st.session_state.authenticated = True
+                            if isinstance(result, dict):
+                                st.session_state.user_info = {
+                                    "user_id": result.get("user_id") or result.get("id"),
+                                    "username": result.get("username") or new_username,
+                                    "email": result.get("email") or new_email,
+                                    "settings": result.get("settings", {}),
+                                }
                             else:
-                                st.error(message)
+                                st.session_state.user_info = {"username": new_username, "email": new_email}
+                            st.rerun()
+                        else:
+                            st.info("注册成功，但自动登录失败，请回到“用户登录”手动登录。")
+                    else:
+                        st.error(msg if isinstance(msg, str) else "注册失败")
+
+    if st.session_state.show_forgot_password:
+        render_forgot_password(analyzer)
 
 def render_forgot_password(analyzer):
     """渲染忘记密码页面"""
@@ -1409,61 +1541,67 @@ def render_price_page(analyzer):
             use_container_width=True,
             height=400
         )
-    
     # 数据导出功能
     st.markdown("---")
     st.markdown("### 数据导出")
-    
+
     col_export1, col_export2, col_export3 = st.columns(3)
-    
+
     with col_export1:
-        csv_data = display_data.to_csv(index=False).encode('utf-8-sig')
+        csv_data = display_data.to_csv(index=False).encode("utf-8-sig")
         st.download_button(
             label="下载CSV数据",
             data=csv_data,
             file_name=f"碳酸锂价格_{symbol}_{period}_{datetime.now().strftime('%Y%m%d')}.csv",
             mime="text/csv",
             use_container_width=True,
-            help="下载当前显示的价格数据为CSV文件"
+            help="下载当前显示的价格数据为CSV文件",
         )
-    
+
     with col_export2:
-        # 保存图表
         buf = io.BytesIO()
-        fig_main.savefig(buf, format='png', dpi=300, bbox_inches='tight')
+        fig_main.savefig(buf, format="png", dpi=300, bbox_inches="tight")
         buf.seek(0)
-        
         st.download_button(
             label="保存图表为PNG",
             data=buf,
             file_name=f"碳酸锂价格图表_{symbol}_{period}_{datetime.now().strftime('%Y%m%d')}.png",
             mime="image/png",
-@@ -1691,411 +1791,826 @@ def render_price_page(analyzer):
-价格波动率：{(display_data['收盘价'].std() / display_data['收盘价'].mean() * 100):.2f}%
+            use_container_width=True,
+            help="下载当前图表为PNG图片",
+        )
+
+    with col_export3:
+        # 生成价格分析报告（文本）
+        latest_price = float(display_data["收盘价"].iloc[-1]) if "收盘价" in display_data.columns and not display_data.empty else float("nan")
+        price_vol = float(display_data["收盘价"].std() / max(display_data["收盘价"].mean(), 1e-9) * 100) if "收盘价" in display_data.columns and len(display_data) > 1 else 0.0
+
+        report_text = f"""=== 碳酸锂价格分析报告 ===
+标的：{symbol}
+周期：{period}
+数据条数：{len(display_data)}
+最新价格：{latest_price:,.2f} 元/吨
+期间最高：{display_data['收盘价'].max():,.2f} 元/吨
+期间最低：{display_data['收盘价'].min():,.2f} 元/吨
+期间均价：{display_data['收盘价'].mean():,.2f} 元/吨
+价格波动率：{price_vol:.2f}%
 
 """
-        
-        if '涨跌幅' in display_data.columns:
-            returns = display_data['涨跌幅'].dropna()
-            report_text += f"""=== 涨跌统计 ===
+
+        if "涨跌幅" in display_data.columns:
+            returns = display_data["涨跌幅"].dropna()
+            if not returns.empty:
+                report_text += f"""=== 涨跌统计 ===
 平均日涨跌：{returns.mean():.2f}%
-上涨天数：{(returns > 0).sum()} 天
-下跌天数：{(returns < 0).sum()} 天
-平盘天数：{(returns == 0).sum()} 天
 最大单日涨幅：{returns.max():.2f}%
 最大单日跌幅：{returns.min():.2f}%
-上涨概率：{(returns > 0).sum() / len(returns) * 100:.1f}%
+上涨天数：{int((returns > 0).sum())}
+下跌天数：{int((returns < 0).sum())}
 
 """
-        
-        report_text += f"""=== 数据说明 ===
-数据来源：akshare金融数据接口
-更新频率：日度数据
-数据用途：仅供参考，不构成投资建议
 
-报告生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        report_text += f"""报告生成时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
-        
 
         st.download_button(
             label="生成分析报告",
@@ -1471,7 +1609,7 @@ def render_price_page(analyzer):
             file_name=f"碳酸锂分析报告_{symbol}_{period}_{datetime.now().strftime('%Y%m%d')}.txt",
             mime="text/plain",
             use_container_width=True,
-            help="生成并下载详细的价格分析报告"
+            help="生成并下载详细的价格分析报告",
         )
 
 def render_basis_page(analyzer):
@@ -2269,6 +2407,5 @@ if __name__ == "__main__":
         st.error(f"应用程序运行出错: {str(e)}")
         st.code(traceback.format_exc())
         st.info("请检查：\n1. 网络连接\n2. 环境变量配置\n3. 依赖包安装")
-
 
 
