@@ -1,6 +1,7 @@
 # app_cloud.py - 完整云端版本
 import streamlit as st
 import pandas as pd
+import plotly.express as px
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
@@ -17,6 +18,16 @@ import traceback
 import math
 from typing import Optional, Dict, Any, List
 warnings.filterwarnings('ignore')
+def _fmt_dt(x):
+    """Format datetime/date/str safely for UI."""
+    try:
+        if hasattr(x, "strftime"):
+            return x.strftime("%Y-%m-%d")
+    except Exception:
+        pass
+    if isinstance(x, str):
+        return x[:10] if len(x) >= 10 else x
+    return str(x)
 
 # 添加utils路径
 sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
@@ -426,6 +437,57 @@ class CloudLithiumAnalyzer:
             "margin_rate": margin_rate,
         }
         return fig, suggestions, metrics
+    def save_analysis_history(self, user_id: str, record: dict) -> bool:
+        """Save analysis record to Supabase (if available) or local session."""
+        record = dict(record or {})
+        record.setdefault("user_id", user_id)
+        record.setdefault("created_at", datetime.utcnow().isoformat())
+        try:
+            if hasattr(self, "supabase") and self.supabase:
+                # Supabase python client style
+                self.supabase.table("analysis_history").insert(record).execute()
+                return True
+        except Exception:
+            # fallback to local store
+            pass
+        try:
+            st.session_state.setdefault("_analysis_history", [])
+            st.session_state["_analysis_history"].append(record)
+            return True
+        except Exception:
+            return False
+
+    def get_user_history(self, user_id: str | None = None, limit: int = 50):
+        """Fetch analysis history for current user."""
+        uid = user_id
+        try:
+            uid = uid or st.session_state.get("user_info", {}).get("user_id") or st.session_state.get("user_id")
+        except Exception:
+            uid = uid or None
+
+        # Try supabase first
+        try:
+            if hasattr(self, "supabase") and self.supabase and uid:
+                resp = (
+                    self.supabase.table("analysis_history")
+                    .select("*")
+                    .eq("user_id", uid)
+                    .order("created_at", desc=True)
+                    .limit(limit)
+                    .execute()
+                )
+                data = getattr(resp, "data", None)
+                if data is None and isinstance(resp, dict):
+                    data = resp.get("data")
+                return data or []
+        except Exception:
+            pass
+
+        # Fallback: local session
+        hist = st.session_state.get("_analysis_history", [])
+        if uid:
+            hist = [r for r in hist if r.get("user_id") == uid]
+        return list(reversed(hist[-limit:]))
 def _norm_cdf(x: float) -> float:
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
@@ -1093,7 +1155,7 @@ def render_hedge_page(analyzer):
             params = results['params']
             
             # 显示数据来源和时间
-            st.info(f"数据时间：{metrics['latest_date'].strftime('%Y-%m-%d')}")
+            st.info(f"数据时间：{_fmt_dt(metrics.get('latest_date'))}")
             
             # 关键指标卡片
             col_metric1, col_metric2, col_metric3 = st.columns(3)
@@ -1168,7 +1230,7 @@ def render_hedge_page(analyzer):
 
 === 市场数据 ===
 当前价格：{metrics['current_price']:,.2f} 元/吨
-数据时间：{metrics['latest_date'].strftime('%Y-%m-%d')}
+数据时间：{_fmt_dt(metrics.get('latest_date'))}
 
 === 套保方案 ===
 理论套保手数：{params['inventory'] * params['hedge_ratio']:.2f} 手
@@ -1562,6 +1624,19 @@ def render_basis_page(analyzer):
         return
 
     display_data = price_data.tail(period_map[period]).copy()
+
+    # 兼容不同数据源列名（避免 KeyError: '日期'）
+    if not display_data.empty:
+        if "日期" not in display_data.columns:
+            if "date" in display_data.columns:
+                display_data = display_data.rename(columns={"date": "日期"})
+            elif "Date" in display_data.columns:
+                display_data = display_data.rename(columns={"Date": "日期"})
+            elif display_data.index.name:
+                display_data = display_data.reset_index().rename(columns={display_data.index.name: "日期"})
+        if "日期" in display_data.columns:
+            display_data["日期"] = pd.to_datetime(display_data["日期"], errors="coerce")
+
     display_data["基差"] = display_data["收盘价"] - spot_price
 
     latest_futures = float(display_data["收盘价"].iloc[-1])
@@ -2317,4 +2392,3 @@ if __name__ == "__main__":
         st.error(f"应用程序运行出错: {str(e)}")
         st.code(traceback.format_exc())
         st.info("请检查：\n1. 网络连接\n2. 环境变量配置\n3. 依赖包安装")
-
