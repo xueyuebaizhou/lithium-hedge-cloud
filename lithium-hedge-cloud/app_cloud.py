@@ -1741,14 +1741,21 @@ def render_basis_page(analyzer):
         )
 
     with col_right:
-        st.markdown("### 市场基准价")
-        spot_price = st.number_input(
-            "现货均价（SMM）",
+        st.markdown("### 市场基准价（双价体系）")
+
+        # 1) 市场参考价（SMM，实时/最新）
+        smm_price = float(st.session_state.get("basis_smm_price", 235000.0))
+        st.metric("市场参考价（SMM）", f"{smm_price:,.0f} 元/吨")
+
+        # 2) 测算基准价（可覆盖），默认等于 SMM
+        analysis_spot_price = st.number_input(
+            "测算基准价（可手动覆盖，用于所有计算）",
             min_value=0.0,
-            value=float(st.session_state.get("basis_spot_price", 235000.0)),
+            value=float(st.session_state.get("basis_analysis_spot_price", smm_price)),
             step=500.0
         )
-        st.session_state.basis_spot_price = spot_price
+        st.session_state.basis_analysis_spot_price = analysis_spot_price
+        st.session_state.basis_smm_price = smm_price
 
     period_map = {
         "最近1个月": 30,
@@ -1776,23 +1783,25 @@ def render_basis_page(analyzer):
         if "日期" in display_data.columns:
             display_data["日期"] = pd.to_datetime(display_data["日期"], errors="coerce")
 
-    display_data["基差"] = display_data["收盘价"] - spot_price
+    display_data["基差"] = analysis_spot_price - display_data["收盘价"]
 
     latest_futures = float(display_data["收盘价"].iloc[-1])
-    latest_basis = latest_futures - spot_price
+    latest_basis = analysis_spot_price - latest_futures
     update_time = display_data["日期"].iloc[-1]
 
-    col_m1, col_m2, col_m3 = st.columns(3)
-    col_m1.metric("市场基准价（数据来源：SMM）", f"{spot_price:,.0f} 元/吨")
-    col_m2.metric("期货基准价（SHFE主力）", f"{latest_futures:,.0f} 元/吨")
-    col_m3.metric("实时基差", f"{latest_basis:+,.0f} 元/吨")
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    col_m1.metric("市场参考价（SMM）", f"{smm_price:,.0f} 元/吨")
+    col_m2.metric("测算基准价（用于计算）", f"{analysis_spot_price:,.0f} 元/吨")
+    col_m3.metric("期货基准价（SHFE主力）", f"{latest_futures:,.0f} 元/吨")
+    col_m4.metric("实时基差（现货均价 - 期货主力）", f"{latest_basis:+,.0f} 元/吨")
+
 
     st.caption(f"更新时间：{update_time.strftime('%Y-%m-%d %H:%M')}")
 
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(display_data["日期"], display_data["基差"], color="#0a84ff", linewidth=2.2)
     ax.axhline(0, color="#8e8e93", linestyle="--", linewidth=1)
-    ax.set_title("基差走势（期货主力 - 现货均价）", fontsize=15, fontweight="bold")
+    ax.set_title("基差走势（现货均价 - 期货主力）", fontsize=15, fontweight="bold")
     ax.set_xlabel("日期")
     ax.set_ylabel("基差 (元/吨)")
     ax.grid(True, alpha=0.3, linestyle="--")
@@ -1801,7 +1810,10 @@ def render_basis_page(analyzer):
     st.pyplot(fig)
 
     st.session_state.basis_data = {
-        "spot_price": spot_price,
+        # 兼容旧字段：spot_price 代表“用于计算的测算基准价”
+        "spot_price": analysis_spot_price,
+        "smm_price": smm_price,
+        "analysis_spot_price": analysis_spot_price,
         "futures_price": latest_futures,
         "basis": latest_basis,
         "update_time": update_time
@@ -2059,7 +2071,7 @@ def render_report_page(analyzer):
         price_data = analyzer.fetch_real_time_data()
         latest_futures = float(price_data["收盘价"].iloc[-1]) if not price_data.empty else 0
         spot_price = st.number_input("现货参考价 (元/吨)", min_value=0.0, value=235000.0, step=500.0)
-        basis_value = latest_futures - spot_price
+        basis_value = spot_price - latest_futures
         update_time = price_data["日期"].iloc[-1] if not price_data.empty else datetime.now()
         basis_data = {
             "spot_price": spot_price,
@@ -2071,12 +2083,21 @@ def render_report_page(analyzer):
     exposure_result = st.session_state.get("exposure_result")
     scenario_results = st.session_state.get("scenario_results", [])
 
+    smm_price = float(basis_data.get("smm_price", basis_data.get("spot_price", 0.0)))
+    analysis_spot_price = float(basis_data.get("analysis_spot_price", basis_data.get("spot_price", 0.0)))
+
     st.markdown("### 1. 当前市场概况")
     st.markdown(
-        f"- 日期：{basis_data['update_time'].strftime('%Y-%m-%d')}\n"
-        f"- 现货价：{basis_data['spot_price']:,.0f} 元/吨\n"
-        f"- 期货价：{basis_data['futures_price']:,.0f} 元/吨\n"
-        f"- 基差：{basis_data['basis']:+,.0f} 元/吨\n"
+        f"- 日期：{basis_data['update_time'].strftime('%Y-%m-%d')}
+"
+        f"- 市场参考价（SMM）：{smm_price:,.0f} 元/吨
+"
+        f"- 测算基准价（用于计算）：{analysis_spot_price:,.0f} 元/吨
+"
+        f"- 期货价（主力）：{basis_data['futures_price']:,.0f} 元/吨
+"
+        f"- 实时基差（现货均价 - 期货主力）：{basis_data['basis']:+,.0f} 元/吨
+"
         f"- 数据来源：SMM（现货）/ SHFE主力（期货）"
     )
 
@@ -2110,9 +2131,10 @@ def render_report_page(analyzer):
 
 1. 当前市场概况
 日期：{basis_data['update_time'].strftime('%Y-%m-%d')}
-现货价：{basis_data['spot_price']:,.0f} 元/吨
-期货价：{basis_data['futures_price']:,.0f} 元/吨
-基差：{basis_data['basis']:+,.0f} 元/吨
+市场参考价（SMM）：{smm_price:,.0f} 元/吨
+测算基准价：{analysis_spot_price:,.0f} 元/吨
+期货价（主力）：{basis_data['futures_price']:,.0f} 元/吨
+实时基差（现货均价 - 期货主力）：{basis_data['basis']:+,.0f} 元/吨
 数据来源：SMM（现货）/ SHFE主力（期货）
 
 2. 风险敞口计算结果
