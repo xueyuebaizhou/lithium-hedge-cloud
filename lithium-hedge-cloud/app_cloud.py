@@ -2088,17 +2088,14 @@ def render_report_page(analyzer):
 
     st.markdown("### 1. 当前市场概况")
     st.markdown(
-        f"- 日期：{basis_data['update_time'].strftime('%Y-%m-%d')}
-"
-        f"- 市场参考价（SMM）：{smm_price:,.0f} 元/吨
-"
-        f"- 测算基准价（用于计算）：{analysis_spot_price:,.0f} 元/吨
-"
-        f"- 期货价（主力）：{basis_data['futures_price']:,.0f} 元/吨
-"
-        f"- 实时基差（现货均价 - 期货主力）：{basis_data['basis']:+,.0f} 元/吨
-"
-        f"- 数据来源：SMM（现货）/ SHFE主力（期货）"
+        "\n".join([
+            f"- 日期：{_fmt_dt(basis_data.get('update_time'))}",
+            f"- 市场参考价（SMM）：{smm_price:,.0f} 元/吨",
+            f"- 测算基准价（用于计算）：{analysis_spot_price:,.0f} 元/吨",
+            f"- 期货价（主力）：{basis_data.get('futures_price', 0):,.0f} 元/吨",
+            f"- 实时基差（现货均价 - 期货主力）：{basis_data.get('basis', 0):+,.0f} 元/吨",
+            "- 数据来源：SMM（现货）/ SHFE主力（期货）",
+        ])
     )
 
     st.markdown("### 2. 风险敞口计算结果")
