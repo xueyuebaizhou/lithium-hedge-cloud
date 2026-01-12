@@ -43,37 +43,72 @@ except ImportError as e:
 
 
 def ensure_chinese_font():
-    """确保云端环境可用中文字体。"""
-    font_dir = os.path.join(os.path.dirname(__file__), 'data', 'fonts')
-    os.makedirs(font_dir, exist_ok=True)
-    font_path = os.path.join(font_dir, 'NotoSansSC-Regular.otf')
-    font_url = (
-        "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/"
-        "SimplifiedChinese/NotoSansSC-Regular.otf"
-    )
-    if not os.path.exists(font_path):
-        try:
-            import urllib.request
-            urllib.request.urlretrieve(font_url, font_path)
-        except Exception as exc:
-            print(f"中文字体下载失败: {exc}")
-            return None
+    """确保云端环境可用中文字体（推荐：随项目携带 fonts/ 字体文件）。
 
-    try:
-        font_manager.fontManager.addfont(font_path)
-        font_name = font_manager.FontProperties(fname=font_path).get_name()
-        return font_name
-    except Exception as exc:
-        print(f"中文字体加载失败: {exc}")
-        return None
+    - Matplotlib：使用本地 TTC/OTF 注册后全局生效
+    - Plotly：通过 @font-face 注入 WOFF2（子集字体），浏览器端可显示中文
+    """
+    base_dir = os.path.dirname(__file__)
+    fonts_dir = os.path.join(base_dir, "fonts")
+    os.makedirs(fonts_dir, exist_ok=True)
+
+    # 1) Matplotlib 字体（用于 plt / matplotlib）
+    ttc_path = os.path.join(fonts_dir, "NotoSansCJK-Regular.ttc")  # 推荐放这个
+    ttf_fallback = os.path.join(fonts_dir, "SourceHanSansSC-Regular.otf")  # 可选备用
+
+    font_name = None
+    for fp in (ttc_path, ttf_fallback):
+        if os.path.exists(fp):
+            try:
+                font_manager.fontManager.addfont(fp)
+                font_name = font_manager.FontProperties(fname=fp).get_name()
+                break
+            except Exception as exc:
+                print(f"中文字体加载失败: {fp} -> {exc}")
+
+    # 2) Plotly / 前端字体（用于 plotly 图表中文）
+    # 使用子集 woff2，文件很小；你需要把它也放到 fonts/ 目录
+    woff2_path = os.path.join(fonts_dir, "NotoSansCJKSC-Subset.woff2")
+    if os.path.exists(woff2_path):
+        try:
+            with open(woff2_path, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode("utf-8")
+            st.markdown(
+                f"""<style>
+@font-face {{
+  font-family: 'NotoSansCJKSC';
+  src: url(data:font/woff2;base64,{b64}) format('woff2');
+  font-weight: normal;
+  font-style: normal;
+}}
+</style>""",
+                unsafe_allow_html=True
+            )
+        except Exception as exc:
+            print(f"Plotly 字体注入失败: {exc}")
+
+    return font_name
 
 
 chinese_font = ensure_chinese_font()
+
+# Matplotlib 全局字体
 if chinese_font:
     matplotlib.rcParams['font.sans-serif'] = [chinese_font, 'DejaVu Sans', 'Arial']
 else:
+    # 兜底（若 fonts/ 没放字体，仍可能变方框）
     matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial']
 matplotlib.rcParams['axes.unicode_minus'] = False
+
+# Plotly 全局字体（浏览器端）：优先使用我们注入的 'NotoSansCJKSC'
+import plotly.io as pio
+PLOTLY_FONT_FAMILY = "NotoSansCJKSC, Microsoft YaHei, SimHei, PingFang SC, Heiti SC, Arial"
+for tpl in ["plotly", "plotly_white", "plotly_dark", "ggplot2", "seaborn", "simple_white", "presentation"]:
+    try:
+        pio.templates[tpl].layout.font.family = PLOTLY_FONT_FAMILY
+    except Exception:
+        pass
+
 
 # ============================================================================
 # 用户认证管理器（云端版）
