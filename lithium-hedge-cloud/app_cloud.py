@@ -29,6 +29,36 @@ def _fmt_dt(x):
         return x[:10] if len(x) >= 10 else x
     return str(x)
 
+
+def normalize_price_data(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize price data columns to expected names."""
+    if df is None or df.empty:
+        return df
+
+    df = df.copy()
+    rename_map = {}
+    for date_col in ["日期", "时间", "date", "Date", "datetime", "timestamp"]:
+        if date_col in df.columns:
+            rename_map[date_col] = "日期"
+            break
+    for close_col in ["收盘价", "收盘", "close", "Close", "last", "价格"]:
+        if close_col in df.columns:
+            rename_map[close_col] = "收盘价"
+            break
+    if rename_map:
+        df = df.rename(columns=rename_map)
+
+    if "日期" not in df.columns and df.index.name:
+        df = df.reset_index().rename(columns={df.index.name: "日期"})
+
+    if "日期" in df.columns:
+        df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+        df = df.sort_values("日期")
+
+    if "收盘价" in df.columns and "涨跌幅" not in df.columns:
+        df["涨跌幅"] = df["收盘价"].pct_change() * 100
+
+    return df
 # 添加utils路径
 sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 
@@ -71,8 +101,10 @@ def ensure_chinese_font():
 chinese_font = ensure_chinese_font()
 if chinese_font:
     matplotlib.rcParams['font.sans-serif'] = [chinese_font, 'DejaVu Sans', 'Arial']
+    matplotlib.rcParams['font.family'] = [chinese_font, 'DejaVu Sans', 'Arial']
 else:
     matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial']
+    matplotlib.rcParams['font.family'] = ['DejaVu Sans', 'Arial']
 matplotlib.rcParams['axes.unicode_minus'] = False
 
 # ============================================================================
@@ -285,7 +317,10 @@ class CloudLithiumAnalyzer:
             import matplotlib as mpl
             from matplotlib import font_manager
 
-            preferred = [
+            preferred = []
+            if chinese_font:
+                preferred.append(chinese_font)
+            preferred += [
                 "Noto Sans CJK SC",
                 "Noto Sans CJK",
                 "Source Han Sans CN",
@@ -298,14 +333,19 @@ class CloudLithiumAnalyzer:
             available = {f.name for f in font_manager.fontManager.ttflist}
             for name in preferred:
                 if name in available:
-                    mpl.rcParams["font.family"] = name
+                    mpl.rcParams["font.family"] = [name, "DejaVu Sans", "Arial"]
                     break
             mpl.rcParams["axes.unicode_minus"] = False
         except Exception:
             # Never crash the app due to font configuration.
             pass
 
-    def fetch_real_time_data(self, symbol: str = "LC0", days: int = 180) -> pd.DataFrame:
+    def fetch_real_time_data(
+        self,
+        symbol: str = "LC0",
+        days: int = 180,
+        force_refresh: bool | None = None,
+    ) -> pd.DataFrame:
         """Return a price series DataFrame.
 
         The UI expects a DataFrame with columns:
@@ -327,6 +367,32 @@ class CloudLithiumAnalyzer:
         # We intentionally keep this very conservative to avoid breaking the app.
         df = None
         try:
+            import akshare as ak
+
+            akshare_sources = [
+                ("futures_zh_daily_sina", {"symbol": symbol}),
+                ("futures_zh_daily", {"symbol": symbol}),
+                ("futures_zh_daily", {"symbol": symbol.lower()}),
+            ]
+            for fn_name, kwargs in akshare_sources:
+                fn = getattr(ak, fn_name, None)
+                if not callable(fn):
+                    continue
+                try:
+                    tmp = fn(**kwargs)
+                except Exception:
+                    continue
+                if isinstance(tmp, pd.DataFrame) and not tmp.empty:
+                    df = normalize_price_data(tmp)
+                    if df is not None and not df.empty:
+                        break
+        except Exception:
+            df = None
+
+        if df is not None and not df.empty:
+            return df.tail(max(30, min(days, 365)))
+
+        try:
             import requests
 
             # Example lightweight endpoint (may fail depending on region/network).
@@ -336,14 +402,14 @@ class CloudLithiumAnalyzer:
             if r.ok and "Date" in r.text and "Close" in r.text:
                 tmp = pd.read_csv(pd.io.common.StringIO(r.text))
                 tmp = tmp.tail(max(30, min(days, 365)))
-                tmp["时间"] = pd.to_datetime(tmp["Date"])
+                tmp["日期"] = pd.to_datetime(tmp["Date"])
                 tmp["收盘价"] = tmp["Close"].astype(float)
-                df = tmp[["时间", "收盘价"]].copy()
+                df = tmp[["日期", "收盘价"]].copy()
         except Exception:
             df = None
 
         if df is not None and not df.empty:
-            return df
+            return normalize_price_data(df)
 
         # 2) Fallback: synthetic walk around a base price.
         base_price = 235000.0
@@ -360,8 +426,8 @@ class CloudLithiumAnalyzer:
         rng = np.random.default_rng(42)
         steps = rng.normal(loc=0.0, scale=0.002, size=n)
         prices = base_price * np.cumprod(1.0 + steps)
-        df = pd.DataFrame({"时间": pd.to_datetime(dates), "收盘价": prices})
-        return df
+        df = pd.DataFrame({"日期": pd.to_datetime(dates), "收盘价": prices})
+        return normalize_price_data(df)
 
     def hedge_calculation(
         self,
@@ -386,6 +452,14 @@ class CloudLithiumAnalyzer:
         cost_price = max(0.0, float(cost_price))
         hedge_ratio = float(hedge_ratio)
         hedge_ratio = max(0.0, min(1.0, hedge_ratio))
+
+        price_data = self.fetch_real_time_data()
+        if price_data is not None and not price_data.empty:
+            current_price = float(price_data["收盘价"].iloc[-1])
+            latest_date = price_data["日期"].iloc[-1]
+        else:
+            current_price = cost_price
+            latest_date = datetime.now()
 
         # Price change scenarios (-20% .. +20%)
         price_changes = np.linspace(-0.2, 0.2, 81)
@@ -429,12 +503,22 @@ class CloudLithiumAnalyzer:
         else:
             suggestions.append("High hedge ratio: strong stabilization but may cap upside.")
 
+        hedge_contracts = inventory * hedge_ratio
+        hedge_contracts_int = int(np.round(hedge_contracts))
+        total_margin = hedge_contracts_int * current_price * margin_rate
+        current_profit = (current_price - cost_price) * inventory
+        profit_percentage = (current_price - cost_price) / cost_price * 100 if cost_price > 0 else 0.0
+
         metrics = {
-            "latest_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "current_price": cost_price,
+            "latest_date": latest_date,
+            "current_price": current_price,
             "hedge_ratio": hedge_ratio,
             "inventory": inventory,
             "margin_rate": margin_rate,
+            "hedge_contracts_int": hedge_contracts_int,
+            "total_margin": total_margin,
+            "current_profit": current_profit,
+            "profit_percentage": profit_percentage,
         }
         return fig, suggestions, metrics
     def save_analysis_history(self, user_id: str, record: dict) -> bool:
@@ -1425,14 +1509,26 @@ def render_price_page(analyzer):
     }
     
     days = period_map[period]
+    display_data = price_data.tail(days).copy()
+    display_data = normalize_price_data(display_data)
+
+    if display_data is None or display_data.empty or "日期" not in display_data.columns:
+        st.error("价格数据格式异常，无法展示图表")
+        return
+
+    latest_price = float(display_data["收盘价"].iloc[-1])
+
+    fig_main, ax_main = plt.subplots(figsize=(12, 6))
+    ax_main.plot(display_data['日期'], display_data['收盘价'], 'b-', linewidth=2, label='收盘价')
+
     if len(display_data) > 20:
         ma20 = display_data['收盘价'].rolling(window=20).mean()
-        ax_main.plot(display_data['日期'], ma20, 'r--', 
+        ax_main.plot(display_data['日期'], ma20, 'r--',
                     linewidth=1.5, alpha=0.7, label='20日移动平均')
     
     if len(display_data) > 60:
         ma60 = display_data['收盘价'].rolling(window=60).mean()
-        ax_main.plot(display_data['日期'], ma60, 'g--', 
+        ax_main.plot(display_data['日期'], ma60, 'g--',
                     linewidth=1.5, alpha=0.7, label='60日移动平均')
     
     ax_main.set_title(f'{symbol} {period}价格走势', fontsize=16, fontweight='bold')
