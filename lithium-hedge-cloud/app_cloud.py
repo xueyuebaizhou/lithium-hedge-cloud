@@ -207,34 +207,52 @@ class CloudUserAuth:
 
         return False, "后端未提供改密接口"
 
-    def generate_reset_code(self, username_or_email: str):
-        """生成/发送重置码（如有邮件验证）。"""
+    def generate_reset_code(self, username_or_email: str, email: str | None = None):
+        """生成/发送重置码（如有邮件验证）。
+
+        兼容旧 UI：可能会同时传入 username 与 email。
+        大多数 Supabase 流程只需要 email，因此优先使用 email。
+        """
         if not self.supabase:
             return False, "数据库连接失败"
+
+        target = (email or username_or_email or "").strip()
+        if not target:
+            return False, "请输入用户名或邮箱"
 
         for fn_name in ["generate_reset_code", "send_reset_code", "send_password_reset_email", "reset_password_for_email"]:
             fn = getattr(self.supabase, fn_name, None)
             if callable(fn):
                 try:
-                    return self._normalize_result(fn(username_or_email), default_ok=True)
+                    return self._normalize_result(fn(target), default_ok=True)
                 except Exception as e:
                     return False, f"发送重置码失败: {e}"
 
         auth = getattr(self.supabase, "auth", None)
         if auth and hasattr(auth, "reset_password_for_email"):
             try:
-                return self._normalize_result(auth.reset_password_for_email(username_or_email), default_ok=True)
+                return self._normalize_result(auth.reset_password_for_email(target), default_ok=True)
             except Exception as e:
                 return False, f"发送重置码失败: {e}"
 
         return False, "后端未提供重置码接口"
 
-    def reset_password(self, username_or_email: str, new_password: str):
-        """直接重置密码（需要后端允许）。"""
+    def reset_password(self, username_or_email: str, reset_code: str | None = None, new_password: str | None = None):
+        """重置密码。
+
+        兼容旧 UI：可能会传入 (username, code, new_password)。
+        若后端不需要 reset_code，将忽略。
+        """
         if not self.supabase:
             return False, "数据库连接失败"
 
-        new_password = new_password or ""
+        # 兼容旧签名：如果第二个参数其实是 new_password
+        if new_password is None and reset_code is not None and reset_code:
+            # 旧 UI 会传 reset_code，但在部分实现里其实是 new_password
+            # 这里不做强推断，保持 new_password 必须显式提供。
+            pass
+
+        new_password = (new_password or "").strip()
         if len(new_password) < 6:
             return False, "新密码至少6位"
 
@@ -242,7 +260,11 @@ class CloudUserAuth:
             fn = getattr(self.supabase, fn_name, None)
             if callable(fn):
                 try:
-                    return self._normalize_result(fn(username_or_email, new_password), default_ok=True)
+                    # 一些实现需要 (username/email, code, new_password)
+                    try:
+                        return self._normalize_result(fn(username_or_email, reset_code, new_password), default_ok=True)
+                    except TypeError:
+                        return self._normalize_result(fn(username_or_email, new_password), default_ok=True)
                 except Exception as e:
                     return False, f"重置密码失败: {e}"
 
@@ -273,6 +295,9 @@ class CloudLithiumAnalyzer:
     def __init__(self):
         self.supabase = supabase if HAS_SUPABASE else None
         self.auth = CloudUserAuth()
+        # Simple in-memory cache for price data (keyed by symbol)
+        self.cache_data: dict[str, pd.DataFrame] = {}
+        self.cache_time: dict[str, datetime] = {}
         self._configure_matplotlib_fonts()
 
     def _configure_matplotlib_fonts(self) -> None:
@@ -305,12 +330,13 @@ class CloudLithiumAnalyzer:
             # Never crash the app due to font configuration.
             pass
 
-    def fetch_real_time_data(self, symbol: str = "LC0", days: int = 180) -> pd.DataFrame:
+    def fetch_real_time_data(self, symbol: str = "LC0", days: int = 180, force_refresh: bool = False) -> pd.DataFrame:
         """Return a price series DataFrame.
 
-        The UI expects a DataFrame with columns:
-            - 时间 (datetime-like)
+        The UI expects a DataFrame with columns (cloud-stable):
+            - 日期 (datetime-like)
             - 收盘价 (float)
+            - 涨跌幅 (float, %, optional)
 
         Because real-time market data sources can be flaky in cloud environments, we:
         1) Try to read from a public endpoint if available;
@@ -322,6 +348,15 @@ class CloudLithiumAnalyzer:
         from datetime import datetime, timedelta
 
         now = datetime.now()
+
+        # Cache (30 minutes)
+        try:
+            ttl = timedelta(minutes=30)
+            if not force_refresh and symbol in self.cache_data and symbol in self.cache_time:
+                if now - self.cache_time[symbol] < ttl:
+                    return self.cache_data[symbol].copy()
+        except Exception:
+            pass
 
         # 1) Optional: attempt to fetch from a simple public endpoint (best-effort).
         # We intentionally keep this very conservative to avoid breaking the app.
@@ -343,7 +378,20 @@ class CloudLithiumAnalyzer:
             df = None
 
         if df is not None and not df.empty:
-            return df
+            df = df.copy()
+            # Normalize column name to the UI convention.
+            if "时间" in df.columns and "日期" not in df.columns:
+                df = df.rename(columns={"时间": "日期"})
+            if "日期" in df.columns:
+                df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+            # Add pct change if missing.
+            if "涨跌幅" not in df.columns and "收盘价" in df.columns and len(df) > 1:
+                df["涨跌幅"] = df["收盘价"].pct_change() * 100
+            df = df.dropna(subset=["日期", "收盘价"]).reset_index(drop=True)
+
+            self.cache_data[symbol] = df
+            self.cache_time[symbol] = now
+            return df.copy()
 
         # 2) Fallback: synthetic walk around a base price.
         base_price = 235000.0
@@ -360,8 +408,18 @@ class CloudLithiumAnalyzer:
         rng = np.random.default_rng(42)
         steps = rng.normal(loc=0.0, scale=0.002, size=n)
         prices = base_price * np.cumprod(1.0 + steps)
-        df = pd.DataFrame({"时间": pd.to_datetime(dates), "收盘价": prices})
-        return df
+        df = pd.DataFrame({"日期": pd.to_datetime(dates), "收盘价": prices})
+        if len(df) > 1:
+            df["涨跌幅"] = df["收盘价"].pct_change() * 100
+        df = df.dropna(subset=["日期", "收盘价"]).reset_index(drop=True)
+
+        # Cache and return
+        try:
+            self.cache_data[symbol] = df
+            self.cache_time[symbol] = now
+        except Exception:
+            pass
+        return df.copy()
 
     def hedge_calculation(
         self,
@@ -387,14 +445,23 @@ class CloudLithiumAnalyzer:
         hedge_ratio = float(hedge_ratio)
         hedge_ratio = max(0.0, min(1.0, hedge_ratio))
 
+        # Get latest market price (best-effort)
+        current_price = cost_price
+        try:
+            price_df = self.fetch_real_time_data(symbol="LC0")
+            if price_df is not None and not price_df.empty and "收盘价" in price_df.columns:
+                current_price = float(price_df["收盘价"].iloc[-1])
+        except Exception:
+            current_price = cost_price
+
         # Price change scenarios (-20% .. +20%)
         price_changes = np.linspace(-0.2, 0.2, 81)
 
         # Assumption: you hold inventory (long physical). Price up => gain, price down => loss.
-        unhedged_pnl = inventory * cost_price * price_changes
+        unhedged_pnl = inventory * current_price * price_changes
 
         # Futures hedge: short futures with notional = inventory * hedge_ratio.
-        hedged_pnl = unhedged_pnl - inventory * cost_price * hedge_ratio * price_changes
+        hedged_pnl = unhedged_pnl - inventory * current_price * hedge_ratio * price_changes
 
         fig, ax = plt.subplots(figsize=(8, 4.5), dpi=160)
         ax.plot(price_changes * 100, unhedged_pnl / 1e6, label="Unhedged P&L (¥ million)")
@@ -429,12 +496,23 @@ class CloudLithiumAnalyzer:
         else:
             suggestions.append("High hedge ratio: strong stabilization but may cap upside.")
 
+        hedge_contracts_int = int(np.round(inventory * hedge_ratio))
+        total_margin = float(hedge_contracts_int * current_price * margin_rate)
+
+        current_profit = float((current_price - cost_price) * inventory)
+        profit_percentage = float((current_price - cost_price) / cost_price * 100) if cost_price > 0 else 0.0
+
         metrics = {
             "latest_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "current_price": cost_price,
-            "hedge_ratio": hedge_ratio,
-            "inventory": inventory,
-            "margin_rate": margin_rate,
+            "current_price": float(current_price),
+            "hedge_ratio": float(hedge_ratio),
+            "inventory": float(inventory),
+            "margin_rate": float(margin_rate),
+            # Fields consumed by UI
+            "hedge_contracts_int": hedge_contracts_int,
+            "total_margin": total_margin,
+            "current_profit": current_profit,
+            "profit_percentage": profit_percentage,
         }
         return fig, suggestions, metrics
     def save_analysis_history(self, user_id: str, record: dict) -> bool:
@@ -1409,41 +1487,67 @@ def render_price_page(analyzer):
     
     # 获取数据
     with st.spinner("正在加载实时价格数据..."):
-        price_data = analyzer.fetch_real_time_data(symbol=symbol)
-    
-    if price_data.empty:
+        price_data = analyzer.fetch_real_time_data(symbol=symbol, force_refresh=st.session_state.get("force_refresh", False))
+        st.session_state.force_refresh = False
+
+    if price_data is None or price_data.empty:
         st.error("无法获取价格数据，请检查网络连接或稍后重试")
         return
-    
+
+    # 统一字段（避免 KeyError: '日期'）
+    price_data = price_data.copy()
+    if "日期" not in price_data.columns:
+        if "时间" in price_data.columns:
+            price_data = price_data.rename(columns={"时间": "日期"})
+        elif "date" in price_data.columns:
+            price_data = price_data.rename(columns={"date": "日期"})
+        elif "Date" in price_data.columns:
+            price_data = price_data.rename(columns={"Date": "日期"})
+    if "日期" in price_data.columns:
+        price_data["日期"] = pd.to_datetime(price_data["日期"], errors="coerce")
+    price_data = price_data.dropna(subset=["日期", "收盘价"]).reset_index(drop=True)
+    if "涨跌幅" not in price_data.columns and len(price_data) > 1:
+        price_data["涨跌幅"] = price_data["收盘价"].pct_change() * 100
+
     # 根据周期筛选数据
     period_map = {
         "最近1个月": 30,
         "最近3个月": 90,
         "最近6个月": 180,
         "最近1年": 365,
-        "全部数据": len(price_data)
+        "全部数据": len(price_data),
     }
-    
-    days = period_map[period]
+    days = int(period_map.get(period, 365))
+    display_data = price_data.tail(days).copy()
+
+    latest_price = float(display_data["收盘价"].iloc[-1])
+    latest_date = display_data["日期"].iloc[-1]
+    latest_change = float(display_data["涨跌幅"].iloc[-1]) if "涨跌幅" in display_data.columns and not pd.isna(display_data["涨跌幅"].iloc[-1]) else 0.0
+
+    st.markdown("### 最新行情")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("最新收盘价", f"{latest_price:,.0f} 元/吨")
+    c2.metric("最新涨跌幅", f"{latest_change:+.2f}%")
+    c3.metric("数据日期", _fmt_dt(latest_date))
+
+    # 主图
+    fig_main, ax_main = plt.subplots(figsize=(12, 6), dpi=160)
+    ax_main.plot(display_data["日期"], display_data["收盘价"], linewidth=2, label="收盘价")
+
+    # 均线
     if len(display_data) > 20:
-        ma20 = display_data['收盘价'].rolling(window=20).mean()
-        ax_main.plot(display_data['日期'], ma20, 'r--', 
-                    linewidth=1.5, alpha=0.7, label='20日移动平均')
-    
+        ma20 = display_data["收盘价"].rolling(window=20).mean()
+        ax_main.plot(display_data["日期"], ma20, linestyle="--", linewidth=1.5, label="20日均线")
     if len(display_data) > 60:
-        ma60 = display_data['收盘价'].rolling(window=60).mean()
-        ax_main.plot(display_data['日期'], ma60, 'g--', 
-                    linewidth=1.5, alpha=0.7, label='60日移动平均')
-    
-    ax_main.set_title(f'{symbol} {period}价格走势', fontsize=16, fontweight='bold')
-    ax_main.set_xlabel('日期', fontsize=12)
-    ax_main.set_ylabel('价格 (元/吨)', fontsize=12)
+        ma60 = display_data["收盘价"].rolling(window=60).mean()
+        ax_main.plot(display_data["日期"], ma60, linestyle="--", linewidth=1.5, label="60日均线")
+
+    ax_main.set_title(f"{symbol} {period}价格走势", fontsize=16, fontweight="bold")
+    ax_main.set_xlabel("日期", fontsize=12)
+    ax_main.set_ylabel("价格 (元/吨)", fontsize=12)
     ax_main.grid(True, alpha=0.3)
     ax_main.legend(fontsize=10)
-    
-    # 格式化y轴
-    ax_main.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, pos: f'{x:,.0f}'))
-    
+    ax_main.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, pos: f"{x:,.0f}"))
     plt.xticks(rotation=45)
     plt.tight_layout()
     st.pyplot(fig_main)
