@@ -368,18 +368,25 @@ class CloudLithiumAnalyzer:
     def fetch_real_time_data(self, symbol: str = "LC0", days: int = 180, force_refresh: bool = False) -> pd.DataFrame:
         """Return a price series DataFrame.
 
-        The UI expects a DataFrame with columns (cloud-stable):
-            - 日期 (datetime-like)
+        Contract symbols:
+        - Continuous contract: e.g. LC0
+        - Specific contract: e.g. LC2603
+
+        Primary source (real, verifiable): AkShare -> 新浪财经期货日频数据
+        Interface: ak.futures_zh_daily_sina(symbol=...)
+
+        Output columns (cloud-stable):
+            - 日期 (datetime)
             - 收盘价 (float)
             - 涨跌幅 (float, %, optional)
+            - 成交量 (optional)
+            - __data_source (str)
+            - __is_simulated (bool)
 
-        Because real-time market data sources can be flaky in cloud environments, we:
-        1) Try to read from a public endpoint if available;
-        2) Fall back to a synthetic series seeded from the SMM price input (if present);
-        3) Always return a non-empty DataFrame to keep the UI functional.
+        If real data fetch fails and no cache exists, we fall back to a **constant** series
+        (NOT random walk) and clearly mark it as simulated so the UI can show a red warning.
         """
         import pandas as pd
-        import numpy as np
         from datetime import datetime, timedelta
 
         now = datetime.now()
@@ -393,70 +400,141 @@ class CloudLithiumAnalyzer:
         except Exception:
             pass
 
-        # 1) Optional: attempt to fetch from a simple public endpoint (best-effort).
-        # We intentionally keep this very conservative to avoid breaking the app.
+        # 1) Primary: AkShare -> 新浪期货日频
         df = None
+        data_source = ""
         try:
-            import requests
+            import akshare as ak
+            raw = ak.futures_zh_daily_sina(symbol=symbol)
+            if raw is not None and not raw.empty:
+                df = raw.copy()
+                # Normalize
+                if "date" in df.columns and "日期" not in df.columns:
+                    df = df.rename(columns={"date": "日期"})
+                if "close" in df.columns and "收盘价" not in df.columns:
+                    df = df.rename(columns={"close": "收盘价"})
+                if "open" in df.columns and "开盘价" not in df.columns:
+                    df = df.rename(columns={"open": "开盘价"})
+                if "high" in df.columns and "最高价" not in df.columns:
+                    df = df.rename(columns={"high": "最高价"})
+                if "low" in df.columns and "最低价" not in df.columns:
+                    df = df.rename(columns={"low": "最低价"})
+                if "volume" in df.columns and "成交量" not in df.columns:
+                    df = df.rename(columns={"volume": "成交量"})
 
-            # Example lightweight endpoint (may fail depending on region/network).
-            # If you have a reliable internal data API, replace this section.
-            url = "https://stooq.com/q/d/l/?s=btcusd&i=d"
-            r = requests.get(url, timeout=3)
-            if r.ok and "Date" in r.text and "Close" in r.text:
-                tmp = pd.read_csv(pd.io.common.StringIO(r.text))
-                tmp = tmp.tail(max(30, min(days, 365)))
-                tmp["时间"] = pd.to_datetime(tmp["Date"])
-                tmp["收盘价"] = tmp["Close"].astype(float)
-                df = tmp[["时间", "收盘价"]].copy()
+                if "日期" in df.columns:
+                    df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
+                df = df.dropna(subset=["日期", "收盘价"]).sort_values("日期").reset_index(drop=True)
+
+                if "涨跌幅" not in df.columns and len(df) > 1:
+                    df["涨跌幅"] = df["收盘价"].pct_change() * 100
+
+                df = df.tail(max(30, min(int(days or 180), 3650))).reset_index(drop=True)
+                data_source = "AkShare:futures_zh_daily_sina(Sina)"
         except Exception:
             df = None
 
         if df is not None and not df.empty:
             df = df.copy()
-            # Normalize column name to the UI convention.
-            if "时间" in df.columns and "日期" not in df.columns:
-                df = df.rename(columns={"时间": "日期"})
-            if "日期" in df.columns:
-                df["日期"] = pd.to_datetime(df["日期"], errors="coerce")
-            # Add pct change if missing.
-            if "涨跌幅" not in df.columns and "收盘价" in df.columns and len(df) > 1:
-                df["涨跌幅"] = df["收盘价"].pct_change() * 100
-            df = df.dropna(subset=["日期", "收盘价"]).reset_index(drop=True)
-
-            self.cache_data[symbol] = df
-            self.cache_time[symbol] = now
+            df["__data_source"] = data_source
+            df["__is_simulated"] = False
+            try:
+                self.cache_data[symbol] = df
+                self.cache_time[symbol] = now
+            except Exception:
+                pass
             return df.copy()
 
-        # 2) Fallback: synthetic walk around a base price.
-        base_price = 235000.0
+        # 2) Cache fallback (stale but real)
         try:
-            # Use Streamlit session_state if available (set by UI input).
-            if "market_spot_price" in st.session_state:
-                base_price = float(st.session_state.market_spot_price)
+            if symbol in self.cache_data and not self.cache_data[symbol].empty:
+                cached = self.cache_data[symbol].copy()
+                cached["__data_source"] = cached.get("__data_source", "CACHE")
+                cached["__is_simulated"] = False
+                return cached
         except Exception:
             pass
 
-        n = max(30, min(days, 365))
+        # 3) Simulated fallback (constant, explicitly marked)
+        base_price = 0.0
+        n = max(30, min(int(days or 180), 365))
         dates = [now - timedelta(days=(n - 1 - i)) for i in range(n)]
-        # Random walk with small drift.
-        rng = np.random.default_rng(42)
-        steps = rng.normal(loc=0.0, scale=0.002, size=n)
-        prices = base_price * np.cumprod(1.0 + steps)
-        df = pd.DataFrame({"日期": pd.to_datetime(dates), "收盘价": prices})
-        if len(df) > 1:
-            df["涨跌幅"] = df["收盘价"].pct_change() * 100
-        df = df.dropna(subset=["日期", "收盘价"]).reset_index(drop=True)
+        df = pd.DataFrame({"日期": pd.to_datetime(dates), "收盘价": [base_price] * n})
+        df["涨跌幅"] = 0.0
+        df["__data_source"] = "SIMULATED:constant_series"
+        df["__is_simulated"] = True
+        return df
 
-        # Cache and return
+    def fetch_spot_reference_price(self, date: Optional[str] = None) -> dict:
+        """Fetch lithium carbonate spot reference price.
+
+        Source: AkShare futures_spot_price(date=YYYYMMDD)
+        Note: AkShare documents that its "现货价格" in this interface is collected from 生意社.
+
+        Returns a dict:
+            {
+              'price': float | None,
+              'date': 'YYYYMMDD',
+              'source': str,
+              'detail': str,
+              'is_simulated': bool
+            }
+        """
+        from datetime import datetime
+        import pandas as pd
+
+        d = date or datetime.now().strftime('%Y%m%d')
         try:
-            self.cache_data[symbol] = df
-            self.cache_time[symbol] = now
-        except Exception:
-            pass
-        return df.copy()
+            import akshare as ak
+            spot_df = ak.futures_spot_price(d)
+            if spot_df is None or spot_df.empty:
+                raise ValueError('empty')
+
+            # Normalize columns
+            df = spot_df.copy()
+            # Expected columns include: 商品, 现货价格, ...
+            if '商品' not in df.columns or '现货价格' not in df.columns:
+                # best effort: try alternative names
+                for c in df.columns:
+                    if '商品' in c and '商品' not in df.columns:
+                        df = df.rename(columns={c: '商品'})
+                    if '现货' in c and '价格' in c and '现货价格' not in df.columns:
+                        df = df.rename(columns={c: '现货价格'})
+
+            df = df.dropna(subset=['商品', '现货价格'])
+            # Filter lithium carbonate rows
+            lc = df[df['商品'].astype(str).str.contains('碳酸锂', na=False)]
+            if lc.empty:
+                return {
+                    'price': None,
+                    'date': d,
+                    'source': 'AkShare:futures_spot_price(生意社)',
+                    'detail': '当日基差表中未匹配到“碳酸锂”条目',
+                    'is_simulated': True,
+                }
+            # Use average spot price across matched rows
+            price = float(pd.to_numeric(lc['现货价格'], errors='coerce').dropna().mean())
+            if not (price > 0):
+                raise ValueError('non-positive')
+            names = ', '.join(lc['商品'].astype(str).head(5).tolist())
+            return {
+                'price': price,
+                'date': d,
+                'source': 'AkShare:futures_spot_price(生意社)',
+                'detail': f'匹配条目示例: {names}',
+                'is_simulated': False,
+            }
+        except Exception as e:
+            return {
+                'price': None,
+                'date': d,
+                'source': 'AkShare:futures_spot_price(生意社)',
+                'detail': f'获取失败: {e}',
+                'is_simulated': True,
+            }
 
     def hedge_calculation(
+
         self,
         cost_price: float,
         inventory: float,
@@ -1732,41 +1810,65 @@ def render_basis_page(analyzer):
         symbol = st.selectbox(
             "选择期货主力合约",
             ["LC0", "LC2401", "LC2402", "LC2403", "LC2404", "LC2405", "LC2406"],
-            index=0
+            index=0,
         )
         period = st.selectbox(
             "查看周期",
             ["最近1个月", "最近3个月", "最近6个月", "最近1年"],
-            index=2
+            index=2,
         )
+
+    # 现货参考价：使用 AkShare 的 futures_spot_price（文档说明现货来自生意社）
+    spot_info = analyzer.fetch_spot_reference_price()
+    ref_price = spot_info.get("price")
+    ref_source = spot_info.get("source", "")
+    ref_detail = spot_info.get("detail", "")
+    ref_is_sim = bool(spot_info.get("is_simulated", True))
+
+    # 允许用上次成功值兜底（仍视为“缓存”，不算模拟，但需要提示“非实时”）
+    if (ref_price is None) and ("basis_ref_price_cache" in st.session_state):
+        ref_price = float(st.session_state.get("basis_ref_price_cache"))
+        ref_is_sim = False
+        ref_source = (ref_source + "+CACHE").strip("+")
+        ref_detail = "使用上次成功获取的缓存值（非实时）。"
+
+    # 最终用于展示的“市场参考价”
+    display_ref_price = float(ref_price) if (ref_price is not None and ref_price > 0) else 0.0
 
     with col_right:
         st.markdown("### 市场基准价（双价体系）")
 
-        # 1) 市场参考价（SMM，实时/最新）
-        smm_price = float(st.session_state.get("basis_smm_price", 235000.0))
-        st.metric("市场参考价（SMM）", f"{smm_price:,.0f} 元/吨")
+        st.metric("市场参考价（生意社/AKShare）", f"{display_ref_price:,.0f} 元/吨")
+        st.caption(f"来源：{ref_source}；{ref_detail}")
 
-        # 2) 测算基准价（可覆盖），默认等于 SMM
+        if ref_is_sim or display_ref_price <= 0:
+            st.markdown(
+                "<div style='color:#b00020;font-weight:700'>当前为模拟数据，禁止用于对外报告</div>",
+                unsafe_allow_html=True,
+            )
+
+        # 2) 测算基准价（可覆盖），默认等于市场参考价
         analysis_spot_price = st.number_input(
             "测算基准价（可手动覆盖，用于所有计算）",
             min_value=0.0,
-            value=float(st.session_state.get("basis_analysis_spot_price", smm_price)),
-            step=500.0
+            value=float(st.session_state.get("basis_analysis_spot_price", display_ref_price)),
+            step=500.0,
         )
         st.session_state.basis_analysis_spot_price = analysis_spot_price
-        st.session_state.basis_smm_price = smm_price
 
-    period_map = {
-        "最近1个月": 30,
-        "最近3个月": 90,
-        "最近6个月": 180,
-        "最近1年": 365
-    }
+        # 存缓存（仅当拿到真实值时）
+        if (ref_price is not None) and (ref_price > 0) and (not ref_is_sim):
+            st.session_state.basis_ref_price_cache = float(ref_price)
 
-    price_data = analyzer.fetch_real_time_data(symbol=symbol)
-    if price_data.empty:
-        st.error("无法获取期货数据")
+    period_map = {"最近1个月": 30, "最近3个月": 90, "最近6个月": 180, "最近1年": 365}
+
+    price_data = analyzer.fetch_real_time_data(symbol=symbol, days=period_map[period], force_refresh=st.session_state.get("force_refresh", False))
+    if price_data is None or price_data.empty or float(price_data.get("__is_simulated", [False])[-1]) is True:
+        st.error("无法获取期货真实数据（AkShare 新浪日频）。")
+        st.markdown(
+            "<div style='color:#b00020;font-weight:700'>当前为模拟数据，禁止用于对外报告</div>",
+            unsafe_allow_html=True,
+        )
         return
 
     display_data = price_data.tail(period_map[period]).copy()
@@ -1783,6 +1885,7 @@ def render_basis_page(analyzer):
         if "日期" in display_data.columns:
             display_data["日期"] = pd.to_datetime(display_data["日期"], errors="coerce")
 
+    # 基差 = 现货均价 - 期货主力
     display_data["基差"] = analysis_spot_price - display_data["收盘价"]
 
     latest_futures = float(display_data["收盘价"].iloc[-1])
@@ -1790,17 +1893,16 @@ def render_basis_page(analyzer):
     update_time = display_data["日期"].iloc[-1]
 
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("市场参考价（SMM）", f"{smm_price:,.0f} 元/吨")
+    col_m1.metric("市场参考价（生意社/AKShare）", f"{display_ref_price:,.0f} 元/吨")
     col_m2.metric("测算基准价（用于计算）", f"{analysis_spot_price:,.0f} 元/吨")
-    col_m3.metric("期货基准价（SHFE主力）", f"{latest_futures:,.0f} 元/吨")
+    col_m3.metric("期货基准价（主力/LC）", f"{latest_futures:,.0f} 元/吨")
     col_m4.metric("实时基差（现货均价 - 期货主力）", f"{latest_basis:+,.0f} 元/吨")
 
-
-    st.caption(f"更新时间：{update_time.strftime('%Y-%m-%d %H:%M')}")
+    st.caption(f"期货数据更新时间：{update_time.strftime('%Y-%m-%d')}")
 
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(display_data["日期"], display_data["基差"], color="#0a84ff", linewidth=2.2)
-    ax.axhline(0, color="#8e8e93", linestyle="--", linewidth=1)
+    ax.plot(display_data["日期"], display_data["基差"], linewidth=2.2)
+    ax.axhline(0, linestyle="--", linewidth=1)
     ax.set_title("基差走势（现货均价 - 期货主力）", fontsize=15, fontweight="bold")
     ax.set_xlabel("日期")
     ax.set_ylabel("基差 (元/吨)")
@@ -1812,19 +1914,22 @@ def render_basis_page(analyzer):
     st.session_state.basis_data = {
         # 兼容旧字段：spot_price 代表“用于计算的测算基准价”
         "spot_price": analysis_spot_price,
-        "smm_price": smm_price,
+        "ref_spot_price": display_ref_price,
+        "ref_spot_source": ref_source,
         "analysis_spot_price": analysis_spot_price,
         "futures_price": latest_futures,
         "basis": latest_basis,
-        "update_time": update_time
+        "update_time": update_time,
     }
 
     st.markdown("#### 数据说明")
     st.markdown(
-        "市场基准价以SMM官方口径为准，期货基准价采用SHFE主力合约。"
-        "基差用于检验套保有效性，仅供参考。"
+        """- 市场参考价：生意社现货口径（通过 AkShare `futures_spot_price` 获取）
+- 期货：AkShare `futures_zh_daily_sina`（新浪财经日频）
+- 基差 = 现货均价 - 期货主力
+- 当数据源不可用且出现红色提示时，表示当前展示为模拟/默认/缓存口径，禁止用于对外报告。"""
     )
-    st.info("价格指数以官方发布为准，本系统仅展示，不自行计算。")
+
 
 
 def render_option_page(analyzer):
@@ -2083,18 +2188,20 @@ def render_report_page(analyzer):
     exposure_result = st.session_state.get("exposure_result")
     scenario_results = st.session_state.get("scenario_results", [])
 
-    smm_price = float(basis_data.get("smm_price", basis_data.get("spot_price", 0.0)))
+    ref_spot_price = float(basis_data.get("ref_spot_price", basis_data.get("spot_price", 0.0)))
+    ref_spot_source = str(basis_data.get("ref_spot_source", "AkShare:futures_spot_price(生意社)"))
     analysis_spot_price = float(basis_data.get("analysis_spot_price", basis_data.get("spot_price", 0.0)))
 
     st.markdown("### 1. 当前市场概况")
     st.markdown(
         "\n".join([
             f"- 日期：{_fmt_dt(basis_data.get('update_time'))}",
-            f"- 市场参考价（SMM）：{smm_price:,.0f} 元/吨",
+            f"- 市场参考价（生意社/AKShare）：{ref_spot_price:,.0f} 元/吨",
+            f"- 市场参考价来源：{ref_spot_source}",
             f"- 测算基准价（用于计算）：{analysis_spot_price:,.0f} 元/吨",
             f"- 期货价（主力）：{basis_data.get('futures_price', 0):,.0f} 元/吨",
             f"- 实时基差（现货均价 - 期货主力）：{basis_data.get('basis', 0):+,.0f} 元/吨",
-            "- 数据来源：SMM（现货）/ SHFE主力（期货）",
+            "- 数据来源：生意社（现货，AkShare futures_spot_price）/ 新浪（期货，AkShare futures_zh_daily_sina）",
         ])
     )
 
@@ -2128,11 +2235,12 @@ def render_report_page(analyzer):
 
 1. 当前市场概况
 日期：{basis_data['update_time'].strftime('%Y-%m-%d')}
-市场参考价（SMM）：{smm_price:,.0f} 元/吨
+市场参考价（生意社/AKShare）：{ref_spot_price:,.0f} 元/吨
+市场参考价来源：{ref_spot_source}
 测算基准价：{analysis_spot_price:,.0f} 元/吨
 期货价（主力）：{basis_data['futures_price']:,.0f} 元/吨
 实时基差（现货均价 - 期货主力）：{basis_data['basis']:+,.0f} 元/吨
-数据来源：SMM（现货）/ SHFE主力（期货）
+数据来源：生意社（现货，AkShare futures_spot_price）/ 新浪（期货，AkShare futures_zh_daily_sina）
 
 2. 风险敞口计算结果
 """
