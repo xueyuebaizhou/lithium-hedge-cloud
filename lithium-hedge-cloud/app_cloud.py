@@ -535,64 +535,63 @@ class CloudLithiumAnalyzer:
             }
 
 
-def list_spot_items(self, date: Optional[str] = None, keyword: str = "锂") -> dict:
-    """List available spot item names from AkShare futures_spot_price.
+    def list_spot_items(self, date: Optional[str] = None, keyword: str = "锂") -> dict:
+        """List available spot item names from AkShare futures_spot_price.
 
-    Returns:
-      {
-        'date': 'YYYYMMDD',
-        'items': [str, ...],
-        'source': 'AkShare:futures_spot_price(生意社)',
-        'detail': str,
-        'is_simulated': bool
-      }
-    """
-    from datetime import datetime
-    d = date or datetime.now().strftime('%Y%m%d')
-    try:
-        import akshare as ak
-        df = ak.futures_spot_price(d)
-        if df is None or df.empty:
-            raise ValueError("empty")
-        tmp = df.copy()
-        if '商品' not in tmp.columns:
-            # best-effort rename
-            for c in tmp.columns:
-                if '商品' in c:
-                    tmp = tmp.rename(columns={c: '商品'})
-                    break
-        if '商品' not in tmp.columns:
-            raise ValueError("missing 商品")
-        tmp = tmp.dropna(subset=['商品'])
-        items = tmp['商品'].astype(str).unique().tolist()
-        kw = str(keyword or "").strip()
-        if kw:
-            items = [x for x in items if kw in x]
-        items = sorted(set(items))
-        if not items:
+        Returns:
+          {
+            'date': 'YYYYMMDD',
+            'items': [str, ...],
+            'source': 'AkShare:futures_spot_price(生意社)',
+            'detail': str,
+            'is_simulated': bool
+          }
+        """
+        from datetime import datetime
+        d = date or datetime.now().strftime('%Y%m%d')
+        try:
+            import akshare as ak
+            df = ak.futures_spot_price(d)
+            if df is None or df.empty:
+                raise ValueError("empty")
+            tmp = df.copy()
+            if '商品' not in tmp.columns:
+                # best-effort rename
+                for c in tmp.columns:
+                    if '商品' in c:
+                        tmp = tmp.rename(columns={c: '商品'})
+                        break
+            if '商品' not in tmp.columns:
+                raise ValueError("missing 商品")
+            tmp = tmp.dropna(subset=['商品'])
+            items = tmp['商品'].astype(str).unique().tolist()
+            kw = str(keyword or "").strip()
+            if kw:
+                items = [x for x in items if kw in x]
+            items = sorted(set(items))
+            if not items:
+                return {
+                    'date': d,
+                    'items': [],
+                    'source': 'AkShare:futures_spot_price(生意社)',
+                    'detail': f'当日未找到包含“{kw}”的品种条目',
+                    'is_simulated': True,
+                }
+            return {
+                'date': d,
+                'items': items,
+                'source': 'AkShare:futures_spot_price(生意社)',
+                'detail': f'当日共匹配到 {len(items)} 个品种条目（关键字：{kw}）',
+                'is_simulated': False,
+            }
+        except Exception as e:
             return {
                 'date': d,
                 'items': [],
                 'source': 'AkShare:futures_spot_price(生意社)',
-                'detail': f'当日未找到包含“{kw}”的品种条目',
+                'detail': f'获取失败: {e}',
                 'is_simulated': True,
             }
-        return {
-            'date': d,
-            'items': items,
-            'source': 'AkShare:futures_spot_price(生意社)',
-            'detail': f'当日共匹配到 {len(items)} 个品种条目（关键字：{kw}）',
-            'is_simulated': False,
-        }
-    except Exception as e:
-        return {
-            'date': d,
-            'items': [],
-            'source': 'AkShare:futures_spot_price(生意社)',
-            'detail': f'获取失败: {e}',
-            'is_simulated': True,
-        }
-
 
     def hedge_calculation(
 
@@ -740,6 +739,8 @@ def list_spot_items(self, date: Optional[str] = None, keyword: str = "锂") -> d
         if uid:
             hist = [r for r in hist if r.get("user_id") == uid]
         return list(reversed(hist[-limit:]))
+
+
 def _norm_cdf(x: float) -> float:
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
 
