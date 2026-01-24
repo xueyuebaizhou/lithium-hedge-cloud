@@ -577,15 +577,15 @@ class CloudLithiumAnalyzer:
         hedged_pnl = unhedged_pnl - inventory * current_price * hedge_ratio * price_changes
 
         fig, ax = plt.subplots(figsize=(8, 4.5), dpi=160)
-        ax.plot(price_changes * 100, unhedged_pnl / 1e6, label="Unhedged P&L (¥ million)")
-        ax.plot(price_changes * 100, hedged_pnl / 1e6, label="Hedged P&L (¥ million)")
+        ax.plot(price_changes * 100, unhedged_pnl / 1e6, label="未套保盈亏（百万元）")
+        ax.plot(price_changes * 100, hedged_pnl / 1e6, label="套保后盈亏（百万元）")
 
         ax.axvline(0, linestyle="--", linewidth=1)
         ax.axhline(0, linestyle="--", linewidth=1)
 
         # Annotate the intersection points at x=0 (always 0) and show base values.
         ax.annotate(
-            "Baseline (0%)\n0.00",
+            "基准情景（0%）\n0.00",
             xy=(0, 0),
             xytext=(5, 5),
             textcoords="offset points",
@@ -593,21 +593,21 @@ class CloudLithiumAnalyzer:
             bbox=dict(boxstyle="round,pad=0.3", alpha=0.2),
         )
 
-        ax.set_title("Hedge Scenario Analysis")
-        ax.set_xlabel("Price change (%)")
-        ax.set_ylabel("Profit / Loss (¥ million)")
+        ax.set_title("套保情景分析")
+        ax.set_xlabel("价格变动（%）")
+        ax.set_ylabel("盈亏（百万元）")
         ax.grid(True, alpha=0.25)
         ax.legend(loc="best", fontsize=9)
 
         suggestions = []
         if hedge_ratio == 0:
-            suggestions.append("No hedge: P&L fully exposed to price moves.")
+            suggestions.append("未套保：盈亏完全暴露于价格波动。")
         elif hedge_ratio < 0.5:
-            suggestions.append("Low hedge ratio: reduces downside but still exposed.")
+            suggestions.append("低套保比例：降低下行风险，但仍存在较大暴露。")
         elif hedge_ratio < 0.9:
-            suggestions.append("Medium hedge ratio: significant risk reduction.")
+            suggestions.append("中等套保比例：显著降低风险敞口。")
         else:
-            suggestions.append("High hedge ratio: strong stabilization but may cap upside.")
+            suggestions.append("高套保比例：盈亏更稳定，但可能限制上行收益。")
 
         hedge_contracts_int = int(np.round(inventory * hedge_ratio))
         total_margin = float(hedge_contracts_int * current_price * margin_rate)
