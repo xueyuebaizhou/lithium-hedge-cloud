@@ -465,7 +465,7 @@ class CloudLithiumAnalyzer:
         df["__is_simulated"] = True
         return df
 
-    def fetch_spot_reference_price(self, date: Optional[str] = None) -> dict:
+    def fetch_spot_reference_price(self, item_query: str = "碳酸锂", date: Optional[str] = None) -> dict:
         """Fetch lithium carbonate spot reference price.
 
         Source: AkShare futures_spot_price(date=YYYYMMDD)
@@ -502,14 +502,15 @@ class CloudLithiumAnalyzer:
                         df = df.rename(columns={c: '现货价格'})
 
             df = df.dropna(subset=['商品', '现货价格'])
-            # Filter lithium carbonate rows
-            lc = df[df['商品'].astype(str).str.contains('碳酸锂', na=False)]
+            # Filter target item rows (default: 碳酸锂)
+            q = str(item_query or '碳酸锂')
+            lc = df[df['商品'].astype(str).str.contains(q, na=False)]
             if lc.empty:
                 return {
                     'price': None,
                     'date': d,
                     'source': 'AkShare:futures_spot_price(生意社)',
-                    'detail': '当日基差表中未匹配到“碳酸锂”条目',
+                    'detail': f'当日基差表中未匹配到“{q}”条目',
                     'is_simulated': True,
                 }
             # Use average spot price across matched rows
@@ -532,6 +533,66 @@ class CloudLithiumAnalyzer:
                 'detail': f'获取失败: {e}',
                 'is_simulated': True,
             }
+
+
+def list_spot_items(self, date: Optional[str] = None, keyword: str = "锂") -> dict:
+    """List available spot item names from AkShare futures_spot_price.
+
+    Returns:
+      {
+        'date': 'YYYYMMDD',
+        'items': [str, ...],
+        'source': 'AkShare:futures_spot_price(生意社)',
+        'detail': str,
+        'is_simulated': bool
+      }
+    """
+    from datetime import datetime
+    d = date or datetime.now().strftime('%Y%m%d')
+    try:
+        import akshare as ak
+        df = ak.futures_spot_price(d)
+        if df is None or df.empty:
+            raise ValueError("empty")
+        tmp = df.copy()
+        if '商品' not in tmp.columns:
+            # best-effort rename
+            for c in tmp.columns:
+                if '商品' in c:
+                    tmp = tmp.rename(columns={c: '商品'})
+                    break
+        if '商品' not in tmp.columns:
+            raise ValueError("missing 商品")
+        tmp = tmp.dropna(subset=['商品'])
+        items = tmp['商品'].astype(str).unique().tolist()
+        kw = str(keyword or "").strip()
+        if kw:
+            items = [x for x in items if kw in x]
+        items = sorted(set(items))
+        if not items:
+            return {
+                'date': d,
+                'items': [],
+                'source': 'AkShare:futures_spot_price(生意社)',
+                'detail': f'当日未找到包含“{kw}”的品种条目',
+                'is_simulated': True,
+            }
+        return {
+            'date': d,
+            'items': items,
+            'source': 'AkShare:futures_spot_price(生意社)',
+            'detail': f'当日共匹配到 {len(items)} 个品种条目（关键字：{kw}）',
+            'is_simulated': False,
+        }
+    except Exception as e:
+        return {
+            'date': d,
+            'items': [],
+            'source': 'AkShare:futures_spot_price(生意社)',
+            'detail': f'获取失败: {e}',
+            'is_simulated': True,
+        }
+
 
     def hedge_calculation(
 
@@ -1801,6 +1862,27 @@ def render_price_page(analyzer):
             help="生成并下载详细的价格分析报告",
         )
 
+
+def _series_last_bool(df: 'pd.DataFrame', col: str, default: bool = False) -> bool:
+    """Safely get the last boolean value from a DataFrame column.
+    Works for pandas Series with RangeIndex where `series[-1]` would raise.
+    """
+    try:
+        if df is None or getattr(df, "empty", True):
+            return default
+        if col not in df.columns:
+            return default
+        s = df[col]
+        # pandas Series
+        if hasattr(s, "iloc"):
+            return bool(s.iloc[-1])
+        # list-like
+        if isinstance(s, (list, tuple, np.ndarray)):
+            return bool(s[-1]) if len(s) else default
+        return bool(s)
+    except Exception:
+        return default
+
 def render_basis_page(analyzer):
     """渲染基差走势页面"""
     st.markdown("<h1>基差走势</h1>", unsafe_allow_html=True)
@@ -1819,7 +1901,26 @@ def render_basis_page(analyzer):
         )
 
     # 现货参考价：使用 AkShare 的 futures_spot_price（文档说明现货来自生意社）
-    spot_info = analyzer.fetch_spot_reference_price()
+    # 先列出当日可用“锂”相关条目，允许用户选择具体品类/地区（避免因名称不匹配导致 empty）
+    spot_items_info = analyzer.list_spot_items(keyword="锂")
+    spot_items = spot_items_info.get("items", []) if isinstance(spot_items_info, dict) else []
+    default_item = "碳酸锂"
+    if spot_items and (default_item not in spot_items):
+        # 尝试选择包含“碳酸锂”的条目
+        for it in spot_items:
+            if "碳酸锂" in str(it):
+                default_item = it
+                break
+        else:
+            default_item = spot_items[0]
+    selected_item = st.session_state.get("basis_spot_item", default_item)
+    if spot_items:
+        selected_item = st.selectbox("现货条目匹配（来自生意社/AKShare）", spot_items, index=(spot_items.index(default_item) if default_item in spot_items else 0))
+        st.session_state["basis_spot_item"] = selected_item
+        st.caption(f"条目列表来源：{spot_items_info.get('source','')}；{spot_items_info.get('detail','')}")
+    else:
+        st.caption(f"现货条目列表获取失败：{spot_items_info.get('detail','') if isinstance(spot_items_info, dict) else ''}")
+    spot_info = analyzer.fetch_spot_reference_price(item_query=str(selected_item or default_item))
     ref_price = spot_info.get("price")
     ref_source = spot_info.get("source", "")
     ref_detail = spot_info.get("detail", "")
@@ -1863,7 +1964,7 @@ def render_basis_page(analyzer):
     period_map = {"最近1个月": 30, "最近3个月": 90, "最近6个月": 180, "最近1年": 365}
 
     price_data = analyzer.fetch_real_time_data(symbol=symbol, days=period_map[period], force_refresh=st.session_state.get("force_refresh", False))
-    if price_data is None or price_data.empty or float(price_data.get("__is_simulated", [False])[-1]) is True:
+    if price_data is None or price_data.empty or (_series_last_bool(price_data, "__is_simulated") is True):
         st.error("无法获取期货真实数据（AkShare 新浪日频）。")
         st.markdown(
             "<div style='color:#b00020;font-weight:700'>当前为模拟数据，禁止用于对外报告</div>",
