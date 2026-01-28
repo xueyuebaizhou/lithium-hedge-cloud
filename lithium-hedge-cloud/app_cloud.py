@@ -740,6 +740,202 @@ class CloudLithiumAnalyzer:
             hist = [r for r in hist if r.get("user_id") == uid]
         return list(reversed(hist[-limit:]))
 
+    # Inventory & Profit (MVP) APIs
+    # -------------------------------
+    def save_inventory_txn(self, user_id: str, txn: dict) -> bool:
+        """Save an inventory transaction record.
+
+        txn fields (recommended):
+            - date (YYYY-MM-DD)
+            - txn_type: '入库' | '出库'
+            - grade: e.g. 电池级 / 工业级
+            - warehouse: 仓库/地点
+            - qty_ton: float
+            - unit_cost: float (required for 入库; optional for 出库)
+            - notes: str
+        """
+        rec = dict(txn or {})
+        rec.setdefault("record_type", "inventory_txn")
+        rec.setdefault("date", datetime.now().strftime("%Y-%m-%d"))
+        rec.setdefault("created_at", datetime.utcnow().isoformat())
+        rec["qty_ton"] = float(rec.get("qty_ton", 0.0) or 0.0)
+        rec["unit_cost"] = float(rec.get("unit_cost", 0.0) or 0.0)
+        return bool(self.save_analysis_history(user_id, rec))
+
+    def save_sales_txn(self, user_id: str, txn: dict) -> bool:
+        """Save a sales (profit) transaction record."""
+        rec = dict(txn or {})
+        rec.setdefault("record_type", "sales_txn")
+        rec.setdefault("date", datetime.now().strftime("%Y-%m-%d"))
+        rec.setdefault("created_at", datetime.utcnow().isoformat())
+        rec["qty_ton"] = float(rec.get("qty_ton", 0.0) or 0.0)
+        rec["unit_price"] = float(rec.get("unit_price", 0.0) or 0.0)
+        # Optional override cost per ton (enterprise real contract/settlement)
+        rec["override_cost"] = float(rec.get("override_cost", 0.0) or 0.0)
+        return bool(self.save_analysis_history(user_id, rec))
+
+    def _get_records_by_type(self, user_id: str, record_type: str, limit: int = 500):
+        rows = self.get_user_history(user_id=user_id, limit=limit) or []
+        out = []
+        for r in rows:
+            try:
+                if (r or {}).get("record_type") == record_type:
+                    out.append(r)
+            except Exception:
+                pass
+        # sort by date then created_at
+        def _k(x):
+            d = (x or {}).get("date") or "1900-01-01"
+            c = (x or {}).get("created_at") or ""
+            return (d, c)
+        out.sort(key=_k)
+        return out
+
+    def get_inventory_txns(self, user_id: str, limit: int = 500):
+        return self._get_records_by_type(user_id, "inventory_txn", limit=limit)
+
+    def get_sales_txns(self, user_id: str, limit: int = 500):
+        return self._get_records_by_type(user_id, "sales_txn", limit=limit)
+
+    def compute_inventory_position(self, user_id: str):
+        """Compute inventory position using moving weighted average cost.
+
+        Returns:
+            summary_df: columns [grade, warehouse, qty_ton, avg_cost]
+            detail: dict with 'simulated' flag if any negative / unknown cost appears
+        """
+        txns = self.get_inventory_txns(user_id, limit=2000)
+        # state per (grade, warehouse)
+        state = {}
+        simulated = False
+
+        def key_of(t):
+            return (str(t.get("grade") or "未分类").strip(), str(t.get("warehouse") or "默认仓").strip())
+
+        for t in txns:
+            k = key_of(t)
+            stt = state.setdefault(k, {"qty": 0.0, "avg_cost": 0.0})
+            qty = float(t.get("qty_ton") or 0.0)
+            unit_cost = float(t.get("unit_cost") or 0.0)
+            tp = str(t.get("txn_type") or "").strip()
+            if tp == "入库":
+                if qty > 0:
+                    new_qty = stt["qty"] + qty
+                    # weighted avg cost
+                    if new_qty <= 0:
+                        stt["qty"] = 0.0
+                        stt["avg_cost"] = 0.0
+                    else:
+                        # if unit_cost missing, mark simulated
+                        if unit_cost <= 0:
+                            simulated = True
+                            # keep avg cost unchanged for safety
+                            unit_cost = stt["avg_cost"]
+                        stt["avg_cost"] = (stt["avg_cost"] * stt["qty"] + unit_cost * qty) / new_qty if new_qty else 0.0
+                        stt["qty"] = new_qty
+            elif tp == "出库":
+                if qty > 0:
+                    stt["qty"] -= qty
+                    if stt["qty"] < -1e-6:
+                        simulated = True  # oversold / data incomplete
+            else:
+                # unknown type -> ignore but mark
+                simulated = True
+
+        rows = []
+        for (grade, wh), s in state.items():
+            q = float(s.get("qty") or 0.0)
+            if abs(q) < 1e-9:
+                continue
+            rows.append({"grade": grade, "warehouse": wh, "qty_ton": round(q, 4), "avg_cost": round(float(s.get("avg_cost") or 0.0), 2)})
+        summary_df = pd.DataFrame(rows)
+        if summary_df.empty:
+            summary_df = pd.DataFrame(columns=["grade", "warehouse", "qty_ton", "avg_cost"])
+        return summary_df, {"simulated": simulated}
+
+    def compute_profit_report(self, user_id: str):
+        """Compute profit report based on inventory ledger + sales records.
+
+        COGS default uses moving average cost at the time of sale (grade+warehouse aggregated by grade).
+        If a sale has override_cost > 0, treat it as enterprise real cost and do NOT mark simulated for that row.
+        """
+        inv_txns = self.get_inventory_txns(user_id, limit=5000)
+        sales = self.get_sales_txns(user_id, limit=5000)
+
+        # Build grade-level state (aggregate warehouses) for simplicity in MVP
+        state = {}
+        simulated = False
+
+        def inv_key(t):
+            return str(t.get("grade") or "未分类").strip()
+
+        # merge events by date
+        events = []
+        for t in inv_txns:
+            events.append(("inv", t.get("date") or "1900-01-01", t.get("created_at") or "", t))
+        for s in sales:
+            events.append(("sale", s.get("date") or "1900-01-01", s.get("created_at") or "", s))
+        events.sort(key=lambda x: (x[1], x[2], 0 if x[0]=="inv" else 1))
+
+        profit_rows = []
+        for kind, _, _, obj in events:
+            if kind == "inv":
+                grade = inv_key(obj)
+                stt = state.setdefault(grade, {"qty": 0.0, "avg_cost": 0.0})
+                tp = str(obj.get("txn_type") or "").strip()
+                qty = float(obj.get("qty_ton") or 0.0)
+                unit_cost = float(obj.get("unit_cost") or 0.0)
+                if tp == "入库" and qty > 0:
+                    new_qty = stt["qty"] + qty
+                    if unit_cost <= 0:
+                        simulated = True
+                        unit_cost = stt["avg_cost"]
+                    stt["avg_cost"] = (stt["avg_cost"] * stt["qty"] + unit_cost * qty) / new_qty if new_qty else 0.0
+                    stt["qty"] = new_qty
+                elif tp == "出库" and qty > 0:
+                    stt["qty"] -= qty
+                    if stt["qty"] < -1e-6:
+                        simulated = True
+                else:
+                    simulated = True
+            else:
+                grade = str(obj.get("grade") or "未分类").strip()
+                stt = state.setdefault(grade, {"qty": 0.0, "avg_cost": 0.0})
+                qty = float(obj.get("qty_ton") or 0.0)
+                unit_price = float(obj.get("unit_price") or 0.0)
+                override_cost = float(obj.get("override_cost") or 0.0)
+                revenue = qty * unit_price
+                if override_cost > 0:
+                    cogs = qty * override_cost
+                    # treat as enterprise real cost
+                else:
+                    cogs = qty * stt["avg_cost"]
+                    # If no inventory or avg_cost unavailable, mark simulated
+                    if stt["avg_cost"] <= 0 or stt["qty"] < qty - 1e-6:
+                        simulated = True
+                gross = revenue - cogs
+                stt["qty"] -= qty
+                if stt["qty"] < -1e-6:
+                    simulated = True
+
+                profit_rows.append({
+                    "date": obj.get("date") or "",
+                    "grade": grade,
+                    "qty_ton": round(qty, 4),
+                    "unit_price": round(unit_price, 2),
+                    "revenue": round(revenue, 2),
+                    "unit_cost_used": round((override_cost if override_cost>0 else stt["avg_cost"]), 2),
+                    "cogs": round(cogs, 2),
+                    "gross_profit": round(gross, 2),
+                    "notes": obj.get("notes") or ""
+                })
+
+        df = pd.DataFrame(profit_rows)
+        if df.empty:
+            df = pd.DataFrame(columns=["date","grade","qty_ton","unit_price","revenue","unit_cost_used","cogs","gross_profit","notes"])
+        return df, {"simulated": simulated}
+
+
 
 def _norm_cdf(x: float) -> float:
     return 0.5 * (1 + math.erf(x / math.sqrt(2)))
@@ -1057,201 +1253,6 @@ def render_reset_password(analyzer):
                     st.rerun()
 
     # -------------------------------
-    # Inventory & Profit (MVP) APIs
-    # -------------------------------
-    def save_inventory_txn(self, user_id: str, txn: dict) -> bool:
-        """Save an inventory transaction record.
-
-        txn fields (recommended):
-            - date (YYYY-MM-DD)
-            - txn_type: '入库' | '出库'
-            - grade: e.g. 电池级 / 工业级
-            - warehouse: 仓库/地点
-            - qty_ton: float
-            - unit_cost: float (required for 入库; optional for 出库)
-            - notes: str
-        """
-        rec = dict(txn or {})
-        rec.setdefault("record_type", "inventory_txn")
-        rec.setdefault("date", datetime.now().strftime("%Y-%m-%d"))
-        rec.setdefault("created_at", datetime.utcnow().isoformat())
-        rec["qty_ton"] = float(rec.get("qty_ton", 0.0) or 0.0)
-        rec["unit_cost"] = float(rec.get("unit_cost", 0.0) or 0.0)
-        return bool(self.save_analysis_history(user_id, rec))
-
-    def save_sales_txn(self, user_id: str, txn: dict) -> bool:
-        """Save a sales (profit) transaction record."""
-        rec = dict(txn or {})
-        rec.setdefault("record_type", "sales_txn")
-        rec.setdefault("date", datetime.now().strftime("%Y-%m-%d"))
-        rec.setdefault("created_at", datetime.utcnow().isoformat())
-        rec["qty_ton"] = float(rec.get("qty_ton", 0.0) or 0.0)
-        rec["unit_price"] = float(rec.get("unit_price", 0.0) or 0.0)
-        # Optional override cost per ton (enterprise real contract/settlement)
-        rec["override_cost"] = float(rec.get("override_cost", 0.0) or 0.0)
-        return bool(self.save_analysis_history(user_id, rec))
-
-    def _get_records_by_type(self, user_id: str, record_type: str, limit: int = 500):
-        rows = self.get_user_history(user_id=user_id, limit=limit) or []
-        out = []
-        for r in rows:
-            try:
-                if (r or {}).get("record_type") == record_type:
-                    out.append(r)
-            except Exception:
-                pass
-        # sort by date then created_at
-        def _k(x):
-            d = (x or {}).get("date") or "1900-01-01"
-            c = (x or {}).get("created_at") or ""
-            return (d, c)
-        out.sort(key=_k)
-        return out
-
-    def get_inventory_txns(self, user_id: str, limit: int = 500):
-        return self._get_records_by_type(user_id, "inventory_txn", limit=limit)
-
-    def get_sales_txns(self, user_id: str, limit: int = 500):
-        return self._get_records_by_type(user_id, "sales_txn", limit=limit)
-
-    def compute_inventory_position(self, user_id: str):
-        """Compute inventory position using moving weighted average cost.
-
-        Returns:
-            summary_df: columns [grade, warehouse, qty_ton, avg_cost]
-            detail: dict with 'simulated' flag if any negative / unknown cost appears
-        """
-        txns = self.get_inventory_txns(user_id, limit=2000)
-        # state per (grade, warehouse)
-        state = {}
-        simulated = False
-
-        def key_of(t):
-            return (str(t.get("grade") or "未分类").strip(), str(t.get("warehouse") or "默认仓").strip())
-
-        for t in txns:
-            k = key_of(t)
-            stt = state.setdefault(k, {"qty": 0.0, "avg_cost": 0.0})
-            qty = float(t.get("qty_ton") or 0.0)
-            unit_cost = float(t.get("unit_cost") or 0.0)
-            tp = str(t.get("txn_type") or "").strip()
-            if tp == "入库":
-                if qty > 0:
-                    new_qty = stt["qty"] + qty
-                    # weighted avg cost
-                    if new_qty <= 0:
-                        stt["qty"] = 0.0
-                        stt["avg_cost"] = 0.0
-                    else:
-                        # if unit_cost missing, mark simulated
-                        if unit_cost <= 0:
-                            simulated = True
-                            # keep avg cost unchanged for safety
-                            unit_cost = stt["avg_cost"]
-                        stt["avg_cost"] = (stt["avg_cost"] * stt["qty"] + unit_cost * qty) / new_qty if new_qty else 0.0
-                        stt["qty"] = new_qty
-            elif tp == "出库":
-                if qty > 0:
-                    stt["qty"] -= qty
-                    if stt["qty"] < -1e-6:
-                        simulated = True  # oversold / data incomplete
-            else:
-                # unknown type -> ignore but mark
-                simulated = True
-
-        rows = []
-        for (grade, wh), s in state.items():
-            q = float(s.get("qty") or 0.0)
-            if abs(q) < 1e-9:
-                continue
-            rows.append({"grade": grade, "warehouse": wh, "qty_ton": round(q, 4), "avg_cost": round(float(s.get("avg_cost") or 0.0), 2)})
-        summary_df = pd.DataFrame(rows)
-        if summary_df.empty:
-            summary_df = pd.DataFrame(columns=["grade", "warehouse", "qty_ton", "avg_cost"])
-        return summary_df, {"simulated": simulated}
-
-    def compute_profit_report(self, user_id: str):
-        """Compute profit report based on inventory ledger + sales records.
-
-        COGS default uses moving average cost at the time of sale (grade+warehouse aggregated by grade).
-        If a sale has override_cost > 0, treat it as enterprise real cost and do NOT mark simulated for that row.
-        """
-        inv_txns = self.get_inventory_txns(user_id, limit=5000)
-        sales = self.get_sales_txns(user_id, limit=5000)
-
-        # Build grade-level state (aggregate warehouses) for simplicity in MVP
-        state = {}
-        simulated = False
-
-        def inv_key(t):
-            return str(t.get("grade") or "未分类").strip()
-
-        # merge events by date
-        events = []
-        for t in inv_txns:
-            events.append(("inv", t.get("date") or "1900-01-01", t.get("created_at") or "", t))
-        for s in sales:
-            events.append(("sale", s.get("date") or "1900-01-01", s.get("created_at") or "", s))
-        events.sort(key=lambda x: (x[1], x[2], 0 if x[0]=="inv" else 1))
-
-        profit_rows = []
-        for kind, _, _, obj in events:
-            if kind == "inv":
-                grade = inv_key(obj)
-                stt = state.setdefault(grade, {"qty": 0.0, "avg_cost": 0.0})
-                tp = str(obj.get("txn_type") or "").strip()
-                qty = float(obj.get("qty_ton") or 0.0)
-                unit_cost = float(obj.get("unit_cost") or 0.0)
-                if tp == "入库" and qty > 0:
-                    new_qty = stt["qty"] + qty
-                    if unit_cost <= 0:
-                        simulated = True
-                        unit_cost = stt["avg_cost"]
-                    stt["avg_cost"] = (stt["avg_cost"] * stt["qty"] + unit_cost * qty) / new_qty if new_qty else 0.0
-                    stt["qty"] = new_qty
-                elif tp == "出库" and qty > 0:
-                    stt["qty"] -= qty
-                    if stt["qty"] < -1e-6:
-                        simulated = True
-                else:
-                    simulated = True
-            else:
-                grade = str(obj.get("grade") or "未分类").strip()
-                stt = state.setdefault(grade, {"qty": 0.0, "avg_cost": 0.0})
-                qty = float(obj.get("qty_ton") or 0.0)
-                unit_price = float(obj.get("unit_price") or 0.0)
-                override_cost = float(obj.get("override_cost") or 0.0)
-                revenue = qty * unit_price
-                if override_cost > 0:
-                    cogs = qty * override_cost
-                    # treat as enterprise real cost
-                else:
-                    cogs = qty * stt["avg_cost"]
-                    # If no inventory or avg_cost unavailable, mark simulated
-                    if stt["avg_cost"] <= 0 or stt["qty"] < qty - 1e-6:
-                        simulated = True
-                gross = revenue - cogs
-                stt["qty"] -= qty
-                if stt["qty"] < -1e-6:
-                    simulated = True
-
-                profit_rows.append({
-                    "date": obj.get("date") or "",
-                    "grade": grade,
-                    "qty_ton": round(qty, 4),
-                    "unit_price": round(unit_price, 2),
-                    "revenue": round(revenue, 2),
-                    "unit_cost_used": round((override_cost if override_cost>0 else stt["avg_cost"]), 2),
-                    "cogs": round(cogs, 2),
-                    "gross_profit": round(gross, 2),
-                    "notes": obj.get("notes") or ""
-                })
-
-        df = pd.DataFrame(profit_rows)
-        if df.empty:
-            df = pd.DataFrame(columns=["date","grade","qty_ton","unit_price","revenue","unit_cost_used","cogs","gross_profit","notes"])
-        return df, {"simulated": simulated}
-
 
 
 
