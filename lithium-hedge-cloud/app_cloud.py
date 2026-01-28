@@ -1944,29 +1944,43 @@ def render_basis_page(analyzer):
         ref_detail = "使用上次成功获取的缓存值（非实时）。"
 
     # 最终用于展示的“市场参考价”
-    display_ref_price = float(ref_price) if (ref_price is not None and ref_price > 0) else 0.0
+    display_ref_price = float(ref_price) if (ref_price is not None and ref_price > 0) else None
 
     with col_right:
         st.markdown("### 市场参考价（统计口径）")
 
-        st.metric("市场参考价", f"{display_ref_price:,.0f} 元/吨")
-        st.caption(f"来源：{ref_source}；{ref_detail}")
+        # 公开统计口径参考价（可能不存在/不可用）
+        if (ref_price is None) or (float(ref_price) <= 0):
+            st.markdown("**市场参考价：暂无**")
+            st.caption(f"来源：{ref_source}；{ref_detail}")
+            st.info("未能从公开统计口径获取该品种的市场参考价。请在下方输入“测算基准价”用于价差演示。")
+        else:
+            st.metric("市场参考价", f"{float(ref_price):,.0f} 元/吨")
+            st.caption(f"来源：{ref_source}；{ref_detail}")
 
-        # 若数据源失败/缺失，按长期约束：必须红字提示“模拟数据，禁止用于对外报告”
-        if ref_is_sim or display_ref_price <= 0:
+        # 用户输入声明：若非企业真实成交/合同价，则视为模拟/估算
+        user_confirm_real = st.checkbox(
+            "我确认下方输入价格为企业真实成交/合同价（将不再视为模拟数据）",
+            value=bool(st.session_state.get("basis_user_confirm_real", False)),
+            key="basis_user_confirm_real",
+        )
+
+        # 测算基准价（可覆盖），默认优先使用市场参考价；否则为 0
+        default_calc = float(ref_price) if (ref_price is not None and float(ref_price) > 0) else 0.0
+        analysis_ref_price = st.number_input(
+            "测算基准价（可手动输入，用于价差计算）",
+            min_value=0.0,
+            value=float(st.session_state.get("basis_analysis_ref_price", default_calc)),
+            step=500.0,
+        )
+        st.session_state.basis_analysis_ref_price = analysis_ref_price
+
+        # 若数据源失败/缺失且未声明为企业真实成交/合同价，按长期约束：必须红字提示“模拟数据，禁止用于对外报告”
+        if (not user_confirm_real) and ((ref_is_sim) or (ref_price is None) or (float(ref_price) <= 0)):
             st.markdown(
                 "<div style='color:#b00020;font-weight:700'>当前为模拟数据，禁止用于对外报告</div>",
                 unsafe_allow_html=True,
             )
-
-        # 测算基准价（可覆盖），默认等于市场参考价
-        analysis_ref_price = st.number_input(
-            "测算基准价（可手动覆盖，用于价差计算）",
-            min_value=0.0,
-            value=float(st.session_state.get("basis_analysis_ref_price", display_ref_price)),
-            step=500.0,
-        )
-        st.session_state.basis_analysis_ref_price = analysis_ref_price
 
         # 存缓存（仅当拿到真实值时）
         if (ref_price is not None) and (ref_price > 0) and (not ref_is_sim):
@@ -2009,10 +2023,10 @@ def render_basis_page(analyzer):
     update_time = display_data["日期"].iloc[-1]
 
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("市场参考价（统计口径）", f"{display_ref_price:,.0f} 元/吨")
+    col_m1.metric("市场参考价（统计口径）", ("暂无" if display_ref_price is None else f"{display_ref_price:,.0f} 元/吨"))
     col_m2.metric("测算基准价（用于计算）", f"{analysis_ref_price:,.0f} 元/吨")
     col_m3.metric("期货基准价（主力/LC）", f"{latest_futures:,.0f} 元/吨")
-    col_m4.metric("实时价差（期货主力 - 市场参考价）", f"{latest_diff:+,.0f} 元/吨")
+    col_m4.metric("实时价差（期货主力 - 测算基准价）", f"{latest_diff:+,.0f} 元/吨")
 
     st.caption(f"期货数据更新时间：{update_time.strftime('%Y-%m-%d')}")
 
