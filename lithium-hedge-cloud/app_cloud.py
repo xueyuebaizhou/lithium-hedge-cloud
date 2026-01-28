@@ -1056,6 +1056,204 @@ def render_reset_password(analyzer):
                     st.session_state.reset_username = None
                     st.rerun()
 
+    # -------------------------------
+    # Inventory & Profit (MVP) APIs
+    # -------------------------------
+    def save_inventory_txn(self, user_id: str, txn: dict) -> bool:
+        """Save an inventory transaction record.
+
+        txn fields (recommended):
+            - date (YYYY-MM-DD)
+            - txn_type: '入库' | '出库'
+            - grade: e.g. 电池级 / 工业级
+            - warehouse: 仓库/地点
+            - qty_ton: float
+            - unit_cost: float (required for 入库; optional for 出库)
+            - notes: str
+        """
+        rec = dict(txn or {})
+        rec.setdefault("record_type", "inventory_txn")
+        rec.setdefault("date", datetime.now().strftime("%Y-%m-%d"))
+        rec.setdefault("created_at", datetime.utcnow().isoformat())
+        rec["qty_ton"] = float(rec.get("qty_ton", 0.0) or 0.0)
+        rec["unit_cost"] = float(rec.get("unit_cost", 0.0) or 0.0)
+        return bool(self.save_analysis_history(user_id, rec))
+
+    def save_sales_txn(self, user_id: str, txn: dict) -> bool:
+        """Save a sales (profit) transaction record."""
+        rec = dict(txn or {})
+        rec.setdefault("record_type", "sales_txn")
+        rec.setdefault("date", datetime.now().strftime("%Y-%m-%d"))
+        rec.setdefault("created_at", datetime.utcnow().isoformat())
+        rec["qty_ton"] = float(rec.get("qty_ton", 0.0) or 0.0)
+        rec["unit_price"] = float(rec.get("unit_price", 0.0) or 0.0)
+        # Optional override cost per ton (enterprise real contract/settlement)
+        rec["override_cost"] = float(rec.get("override_cost", 0.0) or 0.0)
+        return bool(self.save_analysis_history(user_id, rec))
+
+    def _get_records_by_type(self, user_id: str, record_type: str, limit: int = 500):
+        rows = self.get_user_history(user_id=user_id, limit=limit) or []
+        out = []
+        for r in rows:
+            try:
+                if (r or {}).get("record_type") == record_type:
+                    out.append(r)
+            except Exception:
+                pass
+        # sort by date then created_at
+        def _k(x):
+            d = (x or {}).get("date") or "1900-01-01"
+            c = (x or {}).get("created_at") or ""
+            return (d, c)
+        out.sort(key=_k)
+        return out
+
+    def get_inventory_txns(self, user_id: str, limit: int = 500):
+        return self._get_records_by_type(user_id, "inventory_txn", limit=limit)
+
+    def get_sales_txns(self, user_id: str, limit: int = 500):
+        return self._get_records_by_type(user_id, "sales_txn", limit=limit)
+
+    def compute_inventory_position(self, user_id: str):
+        """Compute inventory position using moving weighted average cost.
+
+        Returns:
+            summary_df: columns [grade, warehouse, qty_ton, avg_cost]
+            detail: dict with 'simulated' flag if any negative / unknown cost appears
+        """
+        txns = self.get_inventory_txns(user_id, limit=2000)
+        # state per (grade, warehouse)
+        state = {}
+        simulated = False
+
+        def key_of(t):
+            return (str(t.get("grade") or "未分类").strip(), str(t.get("warehouse") or "默认仓").strip())
+
+        for t in txns:
+            k = key_of(t)
+            stt = state.setdefault(k, {"qty": 0.0, "avg_cost": 0.0})
+            qty = float(t.get("qty_ton") or 0.0)
+            unit_cost = float(t.get("unit_cost") or 0.0)
+            tp = str(t.get("txn_type") or "").strip()
+            if tp == "入库":
+                if qty > 0:
+                    new_qty = stt["qty"] + qty
+                    # weighted avg cost
+                    if new_qty <= 0:
+                        stt["qty"] = 0.0
+                        stt["avg_cost"] = 0.0
+                    else:
+                        # if unit_cost missing, mark simulated
+                        if unit_cost <= 0:
+                            simulated = True
+                            # keep avg cost unchanged for safety
+                            unit_cost = stt["avg_cost"]
+                        stt["avg_cost"] = (stt["avg_cost"] * stt["qty"] + unit_cost * qty) / new_qty if new_qty else 0.0
+                        stt["qty"] = new_qty
+            elif tp == "出库":
+                if qty > 0:
+                    stt["qty"] -= qty
+                    if stt["qty"] < -1e-6:
+                        simulated = True  # oversold / data incomplete
+            else:
+                # unknown type -> ignore but mark
+                simulated = True
+
+        rows = []
+        for (grade, wh), s in state.items():
+            q = float(s.get("qty") or 0.0)
+            if abs(q) < 1e-9:
+                continue
+            rows.append({"grade": grade, "warehouse": wh, "qty_ton": round(q, 4), "avg_cost": round(float(s.get("avg_cost") or 0.0), 2)})
+        summary_df = pd.DataFrame(rows)
+        if summary_df.empty:
+            summary_df = pd.DataFrame(columns=["grade", "warehouse", "qty_ton", "avg_cost"])
+        return summary_df, {"simulated": simulated}
+
+    def compute_profit_report(self, user_id: str):
+        """Compute profit report based on inventory ledger + sales records.
+
+        COGS default uses moving average cost at the time of sale (grade+warehouse aggregated by grade).
+        If a sale has override_cost > 0, treat it as enterprise real cost and do NOT mark simulated for that row.
+        """
+        inv_txns = self.get_inventory_txns(user_id, limit=5000)
+        sales = self.get_sales_txns(user_id, limit=5000)
+
+        # Build grade-level state (aggregate warehouses) for simplicity in MVP
+        state = {}
+        simulated = False
+
+        def inv_key(t):
+            return str(t.get("grade") or "未分类").strip()
+
+        # merge events by date
+        events = []
+        for t in inv_txns:
+            events.append(("inv", t.get("date") or "1900-01-01", t.get("created_at") or "", t))
+        for s in sales:
+            events.append(("sale", s.get("date") or "1900-01-01", s.get("created_at") or "", s))
+        events.sort(key=lambda x: (x[1], x[2], 0 if x[0]=="inv" else 1))
+
+        profit_rows = []
+        for kind, _, _, obj in events:
+            if kind == "inv":
+                grade = inv_key(obj)
+                stt = state.setdefault(grade, {"qty": 0.0, "avg_cost": 0.0})
+                tp = str(obj.get("txn_type") or "").strip()
+                qty = float(obj.get("qty_ton") or 0.0)
+                unit_cost = float(obj.get("unit_cost") or 0.0)
+                if tp == "入库" and qty > 0:
+                    new_qty = stt["qty"] + qty
+                    if unit_cost <= 0:
+                        simulated = True
+                        unit_cost = stt["avg_cost"]
+                    stt["avg_cost"] = (stt["avg_cost"] * stt["qty"] + unit_cost * qty) / new_qty if new_qty else 0.0
+                    stt["qty"] = new_qty
+                elif tp == "出库" and qty > 0:
+                    stt["qty"] -= qty
+                    if stt["qty"] < -1e-6:
+                        simulated = True
+                else:
+                    simulated = True
+            else:
+                grade = str(obj.get("grade") or "未分类").strip()
+                stt = state.setdefault(grade, {"qty": 0.0, "avg_cost": 0.0})
+                qty = float(obj.get("qty_ton") or 0.0)
+                unit_price = float(obj.get("unit_price") or 0.0)
+                override_cost = float(obj.get("override_cost") or 0.0)
+                revenue = qty * unit_price
+                if override_cost > 0:
+                    cogs = qty * override_cost
+                    # treat as enterprise real cost
+                else:
+                    cogs = qty * stt["avg_cost"]
+                    # If no inventory or avg_cost unavailable, mark simulated
+                    if stt["avg_cost"] <= 0 or stt["qty"] < qty - 1e-6:
+                        simulated = True
+                gross = revenue - cogs
+                stt["qty"] -= qty
+                if stt["qty"] < -1e-6:
+                    simulated = True
+
+                profit_rows.append({
+                    "date": obj.get("date") or "",
+                    "grade": grade,
+                    "qty_ton": round(qty, 4),
+                    "unit_price": round(unit_price, 2),
+                    "revenue": round(revenue, 2),
+                    "unit_cost_used": round((override_cost if override_cost>0 else stt["avg_cost"]), 2),
+                    "cogs": round(cogs, 2),
+                    "gross_profit": round(gross, 2),
+                    "notes": obj.get("notes") or ""
+                })
+
+        df = pd.DataFrame(profit_rows)
+        if df.empty:
+            df = pd.DataFrame(columns=["date","grade","qty_ton","unit_price","revenue","unit_cost_used","cogs","gross_profit","notes"])
+        return df, {"simulated": simulated}
+
+
+
 
 def render_main_app(analyzer):
     """渲染主应用界面"""
@@ -1064,6 +1262,8 @@ def render_main_app(analyzer):
         "风险敞口",
         "套保计算",
         "价差走势",
+        "库存管理",
+        "利润管理",
         "期权保险",
         "多情景分析",
         "价格行情",
@@ -1098,6 +1298,10 @@ def render_main_app(analyzer):
         render_hedge_page(analyzer)
     elif st.session_state.current_page == "价差走势":
         render_basis_page(analyzer)
+    elif st.session_state.current_page == "库存管理":
+        render_inventory_page(analyzer)
+    elif st.session_state.current_page == "利润管理":
+        render_profit_page(analyzer)
     elif st.session_state.current_page == "期权保险":
         render_option_page(analyzer)
     elif st.session_state.current_page == "风险敞口":
@@ -1308,6 +1512,25 @@ def render_hedge_page(analyzer):
         
         # 存货量输入
         default_inventory = user_settings.get('default_inventory', 100.0)
+
+        use_inv_mgr = st.checkbox(
+            "从“库存管理”自动读取库存量",
+            value=False,
+            help="自动汇总库存管理台账中的当前库存（吨）。若无记录则使用默认值。"
+        )
+        inv_grade_filter = None
+        if use_inv_mgr and 'user_info' in st.session_state:
+            uid = st.session_state.user_info.get("user_id")
+            inv_summary, inv_meta = analyzer.compute_inventory_position(uid)
+            grades = ["全部"] + (sorted(inv_summary["grade"].unique().tolist()) if not inv_summary.empty else [])
+            choice = st.selectbox("选择品级（可选）", grades, index=0)
+            inv_grade_filter = None if choice == "全部" else choice
+            if not inv_summary.empty:
+                inv_qty = float(inv_summary[inv_summary["grade"] == inv_grade_filter]["qty_ton"].sum()) if inv_grade_filter else float(inv_summary["qty_ton"].sum())
+                default_inventory = inv_qty
+            else:
+                st.info("库存管理暂无记录，将使用默认库存量。")
+
         inventory = st.number_input(
             "存货数量 (吨)",
             min_value=0.0,
@@ -2060,6 +2283,186 @@ def render_basis_page(analyzer):
 - 价差 = 期货主力 - 市场参考价（测算基准价）
 """
     )
+
+
+def render_inventory_page(analyzer):
+    """库存管理（MVP）"""
+    st.markdown("<h1>库存管理</h1>", unsafe_allow_html=True)
+    st.caption("用于记录入库/出库台账，自动汇总当前库存，并与套保计算/利润管理联动。")
+
+    user_info = st.session_state.get("user_info") or {}
+    user_id = user_info.get("user_id") or user_info.get("id") or ""
+    if not user_id:
+        st.error("未获取到用户信息，请重新登录。")
+        return
+
+    tab1, tab2 = st.tabs(["新增记录", "库存总览"])
+
+    with tab1:
+        col1, col2 = st.columns(2)
+        with col1:
+            date = st.date_input("日期", value=datetime.now().date())
+            txn_type = st.selectbox("类型", ["入库", "出库"])
+            grade = st.selectbox("品级", ["电池级", "工业级", "未分类"])
+            warehouse = st.text_input("仓库/地点", value="默认仓")
+            qty = st.number_input("数量 (吨)", min_value=0.0, value=10.0, step=1.0)
+        with col2:
+            unit_cost = st.number_input(
+                "单吨成本 (元/吨)",
+                min_value=0.0,
+                value=100000.0,
+                step=1000.0,
+                help="入库建议填写真实采购/生产成本；出库可不填（系统按移动加权均价核算）。"
+            )
+            notes = st.text_area("备注", value="", height=120)
+
+        # 企业真实数据确认（用于避免触发“模拟数据”红字规则）
+        confirm_real = st.checkbox("我确认上述成本为企业真实采购/生产成本（用于内部核算）", value=False)
+
+        if st.button("保存库存记录", use_container_width=True):
+            txn = {
+                "date": str(date),
+                "txn_type": txn_type,
+                "grade": grade,
+                "warehouse": warehouse.strip() or "默认仓",
+                "qty_ton": float(qty),
+                "unit_cost": float(unit_cost),
+                "notes": notes.strip(),
+                "is_enterprise_real": bool(confirm_real),
+            }
+            ok = analyzer.save_inventory_txn(user_id, txn)
+            if ok:
+                st.success("已保存。")
+                st.rerun()
+            else:
+                st.error("保存失败，请稍后重试。")
+
+    with tab2:
+        summary_df, meta = analyzer.compute_inventory_position(user_id)
+        st.markdown("### 当前库存汇总（移动加权均价）")
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+        if meta.get("simulated"):
+            # 保留项目长期约束：若存在缺失/异常导致“估算/不完整”，必须红字提示
+            st.markdown(
+                "<p style='color:red;font-weight:600;'>当前为模拟数据，禁止用于对外报告</p>",
+                unsafe_allow_html=True
+            )
+            st.caption("原因：存在缺失成本/超卖/未知类型等情况，系统只能做估算汇总。建议补全入库成本、核对出库数量。")
+
+        st.markdown("### 台账明细")
+        txns = analyzer.get_inventory_txns(user_id, limit=2000)
+        df = pd.DataFrame(txns)
+        if df.empty:
+            st.info("暂无库存记录。请先在“新增记录”里录入入库/出库。")
+        else:
+            # 只展示关键列
+            show_cols = [c for c in ["date","txn_type","grade","warehouse","qty_ton","unit_cost","notes"] if c in df.columns]
+            st.dataframe(df[show_cols], use_container_width=True, hide_index=True)
+
+        with st.expander("导出库存台账（CSV）"):
+            txns = analyzer.get_inventory_txns(user_id, limit=5000)
+            df = pd.DataFrame(txns)
+            if df.empty:
+                st.write("暂无可导出数据。")
+            else:
+                csv = df.to_csv(index=False).encode("utf-8-sig")
+                st.download_button("下载 CSV", data=csv, file_name="inventory_ledger.csv", mime="text/csv")
+
+
+def render_profit_page(analyzer):
+    """利润管理（MVP）"""
+    st.markdown("<h1>利润管理</h1>", unsafe_allow_html=True)
+    st.caption("基于销售记录与库存成本台账，输出毛利；可结合套保结果形成“综合利润（含套保）”。")
+
+    user_info = st.session_state.get("user_info") or {}
+    user_id = user_info.get("user_id") or user_info.get("id") or ""
+    if not user_id:
+        st.error("未获取到用户信息，请重新登录。")
+        return
+
+    tab1, tab2 = st.tabs(["新增销售记录", "利润报表"])
+
+    with tab1:
+        col1, col2 = st.columns(2)
+        with col1:
+            date = st.date_input("销售日期", value=datetime.now().date(), key="sale_date")
+            grade = st.selectbox("品级", ["电池级", "工业级", "未分类"], key="sale_grade")
+            qty = st.number_input("销售数量 (吨)", min_value=0.0, value=10.0, step=1.0, key="sale_qty")
+            unit_price = st.number_input("销售单价 (元/吨)", min_value=0.0, value=120000.0, step=1000.0, key="sale_unit_price")
+        with col2:
+            customer = st.text_input("客户（可选）", value="", key="sale_customer")
+            override_cost = st.number_input(
+                "单吨成本覆盖值（可选）",
+                min_value=0.0,
+                value=0.0,
+                step=1000.0,
+                help="如该笔业务有明确结算成本/合同成本，可填写；否则系统将按库存移动加权均价核算。"
+            )
+            notes = st.text_area("备注", value="", height=120, key="sale_notes")
+
+        confirm_real = st.checkbox("我确认上述销售单价/成本（如填写）为企业真实业务数据（用于内部核算）", value=False, key="sale_confirm")
+
+        if st.button("保存销售记录", use_container_width=True):
+            txn = {
+                "date": str(date),
+                "grade": grade,
+                "qty_ton": float(qty),
+                "unit_price": float(unit_price),
+                "customer": customer.strip(),
+                "override_cost": float(override_cost),
+                "notes": notes.strip(),
+                "is_enterprise_real": bool(confirm_real),
+            }
+            ok = analyzer.save_sales_txn(user_id, txn)
+            if ok:
+                st.success("已保存。")
+                st.rerun()
+            else:
+                st.error("保存失败，请稍后重试。")
+
+    with tab2:
+        profit_df, meta = analyzer.compute_profit_report(user_id)
+
+        st.markdown("### 毛利明细（经营层）")
+        st.dataframe(profit_df, use_container_width=True, hide_index=True)
+
+        total_revenue = float(profit_df["revenue"].sum()) if not profit_df.empty else 0.0
+        total_cogs = float(profit_df["cogs"].sum()) if not profit_df.empty else 0.0
+        total_gross = float(profit_df["gross_profit"].sum()) if not profit_df.empty else 0.0
+
+        colA, colB, colC = st.columns(3)
+        colA.metric("累计收入", f"{total_revenue:,.0f} 元")
+        colB.metric("累计成本", f"{total_cogs:,.0f} 元")
+        colC.metric("累计毛利", f"{total_gross:,.0f} 元")
+
+        # 套保损益（如果已有）
+        hedge_pnl = 0.0
+        try:
+            # 优先从 session_state 里拿最近一次套保计算结果
+            hedge_result = st.session_state.get("hedge_result") or {}
+            hedge_pnl = float(hedge_result.get("estimated_pnl", 0.0) or 0.0)
+        except Exception:
+            hedge_pnl = 0.0
+
+        st.markdown("### 综合利润（含套保）")
+        st.caption("套保损益为系统估算值，取自最近一次套保计算/记录（如有）。")
+        st.metric("综合利润（毛利 + 套保损益）", f"{(total_gross + hedge_pnl):,.0f} 元")
+
+        if meta.get("simulated"):
+            st.markdown(
+                "<p style='color:red;font-weight:600;'>当前为模拟数据，禁止用于对外报告</p>",
+                unsafe_allow_html=True
+            )
+            st.caption("原因：库存成本缺失/库存不足导致成本估算；建议补全库存台账或为销售记录填写明确成本覆盖值。")
+
+        with st.expander("导出利润明细（CSV）"):
+            if profit_df.empty:
+                st.write("暂无可导出数据。")
+            else:
+                csv = profit_df.to_csv(index=False).encode("utf-8-sig")
+                st.download_button("下载 CSV", data=csv, file_name="profit_report.csv", mime="text/csv")
+
 
 def render_option_page(analyzer):
     """渲染期权保险计算页面"""
