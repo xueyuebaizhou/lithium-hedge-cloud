@@ -1063,7 +1063,7 @@ def render_main_app(analyzer):
         "首页",
         "风险敞口",
         "套保计算",
-        "基差走势",
+        "价差走势",
         "期权保险",
         "多情景分析",
         "价格行情",
@@ -1096,7 +1096,7 @@ def render_main_app(analyzer):
         render_home_page(analyzer)
     elif st.session_state.current_page == "套保计算":
         render_hedge_page(analyzer)
-    elif st.session_state.current_page == "基差走势":
+    elif st.session_state.current_page == "价差走势":
         render_basis_page(analyzer)
     elif st.session_state.current_page == "期权保险":
         render_option_page(analyzer)
@@ -1218,7 +1218,7 @@ def render_home_page(analyzer):
     
     with st.expander("新增功能模块"):
         st.markdown("""
-        - 基差走势与价格指数展示
+        - 价差走势与价格指数展示
         - 价格保险（期权）测算
         - 风险敞口量化与可视化
         - 多情景分析与对比表格
@@ -1885,8 +1885,11 @@ def _series_last_bool(df: 'pd.DataFrame', col: str, default: bool = False) -> bo
         return default
 
 def render_basis_page(analyzer):
-    """渲染基差走势页面"""
-    st.markdown("<h1>基差走势</h1>", unsafe_allow_html=True)
+    """渲染期货-市场参考价差页面（降级：市场参考价为统计口径，非现货成交价）"""
+    st.markdown("<h1>期货-市场参考价差走势</h1>", unsafe_allow_html=True)
+
+    # 免责声明（普通字体，不标红）
+    st.markdown("当前所用价格为行业市场参考价（统计口径），非现货成交价。")
 
     col_left, col_right = st.columns([2, 1])
     with col_left:
@@ -1901,7 +1904,7 @@ def render_basis_page(analyzer):
             index=2,
         )
 
-    # 现货参考价：使用 AkShare 的 futures_spot_price（文档说明现货来自生意社）
+    # 市场参考价（统计口径）：使用 AkShare futures_spot_price（文档说明来自生意社）
     # 先列出当日可用“锂”相关条目，允许用户选择具体品类/地区（避免因名称不匹配导致 empty）
     spot_items_info = analyzer.list_spot_items(keyword="锂")
     spot_items = spot_items_info.get("items", []) if isinstance(spot_items_info, dict) else []
@@ -1914,13 +1917,19 @@ def render_basis_page(analyzer):
                 break
         else:
             default_item = spot_items[0]
+
     selected_item = st.session_state.get("basis_spot_item", default_item)
     if spot_items:
-        selected_item = st.selectbox("现货条目匹配（来自生意社/AKShare）", spot_items, index=(spot_items.index(default_item) if default_item in spot_items else 0))
+        selected_item = st.selectbox(
+            "市场参考价条目匹配（统计口径，生意社/AKShare）",
+            spot_items,
+            index=(spot_items.index(default_item) if default_item in spot_items else 0),
+        )
         st.session_state["basis_spot_item"] = selected_item
         st.caption(f"条目列表来源：{spot_items_info.get('source','')}；{spot_items_info.get('detail','')}")
     else:
-        st.caption(f"现货条目列表获取失败：{spot_items_info.get('detail','') if isinstance(spot_items_info, dict) else ''}")
+        st.caption(f"市场参考价条目列表获取失败：{spot_items_info.get('detail','') if isinstance(spot_items_info, dict) else ''}")
+
     spot_info = analyzer.fetch_spot_reference_price(item_query=str(selected_item or default_item))
     ref_price = spot_info.get("price")
     ref_source = spot_info.get("source", "")
@@ -1938,25 +1947,26 @@ def render_basis_page(analyzer):
     display_ref_price = float(ref_price) if (ref_price is not None and ref_price > 0) else 0.0
 
     with col_right:
-        st.markdown("### 市场基准价（双价体系）")
+        st.markdown("### 市场参考价（统计口径）")
 
-        st.metric("市场参考价（生意社/AKShare）", f"{display_ref_price:,.0f} 元/吨")
+        st.metric("市场参考价", f"{display_ref_price:,.0f} 元/吨")
         st.caption(f"来源：{ref_source}；{ref_detail}")
 
+        # 若数据源失败/缺失，按长期约束：必须红字提示“模拟数据，禁止用于对外报告”
         if ref_is_sim or display_ref_price <= 0:
             st.markdown(
                 "<div style='color:#b00020;font-weight:700'>当前为模拟数据，禁止用于对外报告</div>",
                 unsafe_allow_html=True,
             )
 
-        # 2) 测算基准价（可覆盖），默认等于市场参考价
-        analysis_spot_price = st.number_input(
-            "测算基准价（可手动覆盖，用于所有计算）",
+        # 测算基准价（可覆盖），默认等于市场参考价
+        analysis_ref_price = st.number_input(
+            "测算基准价（可手动覆盖，用于价差计算）",
             min_value=0.0,
-            value=float(st.session_state.get("basis_analysis_spot_price", display_ref_price)),
+            value=float(st.session_state.get("basis_analysis_ref_price", display_ref_price)),
             step=500.0,
         )
-        st.session_state.basis_analysis_spot_price = analysis_spot_price
+        st.session_state.basis_analysis_ref_price = analysis_ref_price
 
         # 存缓存（仅当拿到真实值时）
         if (ref_price is not None) and (ref_price > 0) and (not ref_is_sim):
@@ -1964,7 +1974,11 @@ def render_basis_page(analyzer):
 
     period_map = {"最近1个月": 30, "最近3个月": 90, "最近6个月": 180, "最近1年": 365}
 
-    price_data = analyzer.fetch_real_time_data(symbol=symbol, days=period_map[period], force_refresh=st.session_state.get("force_refresh", False))
+    price_data = analyzer.fetch_real_time_data(
+        symbol=symbol,
+        days=period_map[period],
+        force_refresh=st.session_state.get("force_refresh", False),
+    )
     if price_data is None or price_data.empty or (_series_last_bool(price_data, "__is_simulated") is True):
         st.error("无法获取期货真实数据（AkShare 新浪日频）。")
         st.markdown(
@@ -1987,52 +2001,51 @@ def render_basis_page(analyzer):
         if "日期" in display_data.columns:
             display_data["日期"] = pd.to_datetime(display_data["日期"], errors="coerce")
 
-    # 基差 = 现货均价 - 期货主力
-    display_data["基差"] = analysis_spot_price - display_data["收盘价"]
+    # 价差 = 期货主力 - 市场参考价（测算基准价）
+    display_data["价差"] = display_data["收盘价"] - analysis_ref_price
 
     latest_futures = float(display_data["收盘价"].iloc[-1])
-    latest_basis = analysis_spot_price - latest_futures
+    latest_diff = latest_futures - analysis_ref_price
     update_time = display_data["日期"].iloc[-1]
 
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("市场参考价（生意社/AKShare）", f"{display_ref_price:,.0f} 元/吨")
-    col_m2.metric("测算基准价（用于计算）", f"{analysis_spot_price:,.0f} 元/吨")
+    col_m1.metric("市场参考价（统计口径）", f"{display_ref_price:,.0f} 元/吨")
+    col_m2.metric("测算基准价（用于计算）", f"{analysis_ref_price:,.0f} 元/吨")
     col_m3.metric("期货基准价（主力/LC）", f"{latest_futures:,.0f} 元/吨")
-    col_m4.metric("实时基差（现货均价 - 期货主力）", f"{latest_basis:+,.0f} 元/吨")
+    col_m4.metric("实时价差（期货主力 - 市场参考价）", f"{latest_diff:+,.0f} 元/吨")
 
     st.caption(f"期货数据更新时间：{update_time.strftime('%Y-%m-%d')}")
 
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(display_data["日期"], display_data["基差"], linewidth=2.2)
+    ax.plot(display_data["日期"], display_data["价差"], linewidth=2.2)
     ax.axhline(0, linestyle="--", linewidth=1)
-    ax.set_title("基差走势（现货均价 - 期货主力）", fontsize=15, fontweight="bold")
+    ax.set_title("价差走势（期货主力 - 市场参考价）", fontsize=15, fontweight="bold")
     ax.set_xlabel("日期")
-    ax.set_ylabel("基差 (元/吨)")
+    ax.set_ylabel("价差 (元/吨)")
     ax.grid(True, alpha=0.3, linestyle="--")
     plt.xticks(rotation=30)
     plt.tight_layout()
     st.pyplot(fig)
 
+    # 兼容旧字段：basis/spot_price 仍保留，但含义已调整为“期货-市场参考价差/测算基准价”
     st.session_state.basis_data = {
-        # 兼容旧字段：spot_price 代表“用于计算的测算基准价”
-        "spot_price": analysis_spot_price,
-        "ref_spot_price": display_ref_price,
+        "spot_price": analysis_ref_price,           # 旧字段：代表“测算基准价”
+        "ref_spot_price": display_ref_price,        # 旧字段：代表“市场参考价”
         "ref_spot_source": ref_source,
-        "analysis_spot_price": analysis_spot_price,
+        "analysis_spot_price": analysis_ref_price,  # 旧字段：代表“测算基准价”
         "futures_price": latest_futures,
-        "basis": latest_basis,
+        "basis": latest_diff,                       # 旧字段：代表“价差”
+        "diff": latest_diff,
         "update_time": update_time,
     }
 
     st.markdown("#### 数据说明")
     st.markdown(
-        """- 市场参考价：生意社现货口径（通过 AkShare `futures_spot_price` 获取）
+        """- 市场参考价：行业市场参考价（统计口径，来源：生意社，经 AkShare `futures_spot_price` 获取）
 - 期货：AkShare `futures_zh_daily_sina`（新浪财经日频）
-- 基差 = 现货均价 - 期货主力
-- 当数据源不可用且出现红色提示时，表示当前展示为模拟/默认/缓存口径，禁止用于对外报告。"""
+- 价差 = 期货主力 - 市场参考价（测算基准价）
+"""
     )
-
-
 
 def render_option_page(analyzer):
     """渲染期权保险计算页面"""
@@ -2302,7 +2315,7 @@ def render_report_page(analyzer):
             f"- 市场参考价来源：{ref_spot_source}",
             f"- 测算基准价（用于计算）：{analysis_spot_price:,.0f} 元/吨",
             f"- 期货价（主力）：{basis_data.get('futures_price', 0):,.0f} 元/吨",
-            f"- 实时基差（现货均价 - 期货主力）：{basis_data.get('basis', 0):+,.0f} 元/吨",
+            f"- 实时价差（期货主力 - 市场参考价）：{basis_data.get('basis', 0):+,.0f} 元/吨",
             "- 数据来源：生意社（现货，AkShare futures_spot_price）/ 新浪（期货，AkShare futures_zh_daily_sina）",
         ])
     )
@@ -2327,7 +2340,7 @@ def render_report_page(analyzer):
 
     st.markdown("### 4. 风险提示与建议")
     st.markdown(
-        "- 基差扩大时需关注套保效率变化。\n"
+        "- 价差扩大时需关注套保效率变化。\n"
         "- 结合敞口方向优先选择期货或期权锁定风险。\n"
         "- 如需精细报告，可导出当前页面内容并补充业务说明。"
     )
@@ -2341,7 +2354,7 @@ def render_report_page(analyzer):
 市场参考价来源：{ref_spot_source}
 测算基准价：{analysis_spot_price:,.0f} 元/吨
 期货价（主力）：{basis_data['futures_price']:,.0f} 元/吨
-实时基差（现货均价 - 期货主力）：{basis_data['basis']:+,.0f} 元/吨
+实时价差（期货主力 - 市场参考价）：{basis_data['basis']:+,.0f} 元/吨
 数据来源：生意社（现货，AkShare futures_spot_price）/ 新浪（期货，AkShare futures_zh_daily_sina）
 
 2. 风险敞口计算结果
@@ -2368,7 +2381,7 @@ def render_report_page(analyzer):
 
     report_text += "\n4. 风险提示与建议\n"
     report_text += (
-        "基差扩大时需关注套保效率变化；结合敞口方向选择期货或期权；"
+        "价差扩大时需关注套保效率变化；结合敞口方向选择期货或期权；"
         "如需精细报告，可补充业务说明。\n"
     )
 
