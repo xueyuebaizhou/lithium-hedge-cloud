@@ -3,8 +3,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import numpy as np
-import requests
-import re
 import matplotlib.pyplot as plt
 import matplotlib
 from matplotlib import font_manager
@@ -18,6 +16,8 @@ import base64
 import hashlib
 import traceback
 import math
+import re
+import requests
 from typing import Optional, Dict, Any, List
 warnings.filterwarnings('ignore')
 def _fmt_dt(x):
@@ -335,9 +335,6 @@ class CloudLithiumAnalyzer:
         # Simple in-memory cache for price data (keyed by symbol)
         self.cache_data: dict[str, pd.DataFrame] = {}
         self.cache_time: dict[str, datetime] = {}
-        # Cache for 100ppi benchmark spot price (30 minutes)
-        self.cache_spot_100ppi: dict[str, dict] = {}
-        self.cache_spot_100ppi_time: dict[str, datetime] = {}
         self._configure_matplotlib_fonts()
 
     def _configure_matplotlib_fonts(self) -> None:
@@ -540,6 +537,99 @@ class CloudLithiumAnalyzer:
             }
 
 
+
+    def fetch_100ppi_benchmark_price(self, url: str, force_refresh: bool = False, cache_minutes: int = 30) -> dict:
+        """Fetch benchmark spot price from 100ppi (生意社) detail page.
+
+        Returns:
+            dict with keys: price(float|None), unit(str), source(str), url(str),
+            update_time(str|None), is_simulated(bool), detail(str)
+        """
+        try:
+            # cache key per-url
+            key = "100ppi_" + hashlib.md5(url.encode("utf-8")).hexdigest()
+            now = datetime.now()
+            last_t = self.cache_time.get(key)
+            if (not force_refresh) and last_t and (now - last_t) < timedelta(minutes=cache_minutes):
+                df = self.cache_data.get(key)
+                if isinstance(df, pd.DataFrame) and not df.empty:
+                    row = df.iloc[0].to_dict()
+                    return {
+                        "price": float(row.get("price")) if row.get("price") is not None else None,
+                        "unit": row.get("unit", "元/吨"),
+                        "source": "100ppi",
+                        "url": url,
+                        "update_time": row.get("update_time"),
+                        "is_simulated": False,
+                        "detail": "缓存命中（非强制刷新）",
+                    }
+
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            }
+            r = requests.get(url, headers=headers, timeout=12)
+            r.raise_for_status()
+            html = r.text or ""
+
+            # Price: prefer pattern like '170000.00 元/吨' (allow commas)
+            price = None
+            unit = "元/吨"
+            m_price = re.search(r'([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*元/吨', html)
+            if not m_price:
+                # fallback: sometimes appears in JS or meta, still followed by '元/吨'
+                m_price = re.search(r'([0-9]{4,})\s*元/吨', html)
+            if m_price:
+                price = float(m_price.group(1).replace(",", ""))
+
+            # Update time: try common patterns '更新时间：03-02 16:00'
+            update_time = None
+            m_ut = re.search(r'更新\s*时间[：:\s]*([0-9]{2}-[0-9]{2}\s*[0-9]{2}:[0-9]{2})', html)
+            if m_ut:
+                update_time = m_ut.group(1).strip()
+
+            if (price is None) or (price <= 0):
+                return {
+                    "price": None,
+                    "unit": unit,
+                    "source": "100ppi",
+                    "url": url,
+                    "update_time": update_time,
+                    "is_simulated": True,
+                    "detail": "页面解析未得到有效价格字段（可能是页面结构变更或被反爬）。",
+                }
+
+            # store to cache as a 1-row df for compatibility
+            cache_df = pd.DataFrame([{
+                "price": price,
+                "unit": unit,
+                "update_time": update_time,
+                "url": url,
+                "fetched_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+            }])
+            self.cache_data[key] = cache_df
+            self.cache_time[key] = now
+
+            return {
+                "price": price,
+                "unit": unit,
+                "source": "100ppi",
+                "url": url,
+                "update_time": update_time,
+                "is_simulated": False,
+                "detail": "抓取成功",
+            }
+        except Exception as e:
+            return {
+                "price": None,
+                "unit": "元/吨",
+                "source": "100ppi",
+                "url": url,
+                "update_time": None,
+                "is_simulated": True,
+                "detail": f"抓取失败：{e}",
+            }
+
     def list_spot_items(self, date: Optional[str] = None, keyword: str = "锂") -> dict:
         """List available spot item names from AkShare futures_spot_price.
 
@@ -597,108 +687,6 @@ class CloudLithiumAnalyzer:
                 'detail': f'获取失败: {e}',
                 'is_simulated': True,
             }
-def fetch_100ppi_benchmark_price(self, url: str = "https://www.100ppi.com/rawmex/detail-733.html", force_refresh: bool = False) -> dict:
-    """Fetch benchmark spot price from 100ppi (生意社) page.
-
-    This is a simple HTML fetch + robust regex parse (no simulated prices).
-    Returns:
-      {
-        'price': float | None,
-        'source': str,
-        'detail': str,
-        'is_simulated': bool,
-        'url': str,
-        'fetched_at': 'YYYY-MM-DD HH:MM'
-      }
-    """
-    from datetime import datetime, timedelta
-
-    now = datetime.now()
-    cache_key = url.strip()
-    ttl = timedelta(minutes=30)
-
-    # Cache
-    try:
-        if (not force_refresh) and cache_key in self.cache_spot_100ppi and cache_key in self.cache_spot_100ppi_time:
-            if now - self.cache_spot_100ppi_time[cache_key] < ttl:
-                return dict(self.cache_spot_100ppi[cache_key])
-    except Exception:
-        pass
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-    }
-
-    try:
-        resp = requests.get(url, headers=headers, timeout=10)
-        resp.raise_for_status()
-        # best-effort encoding
-        try:
-            if not resp.encoding:
-                resp.encoding = resp.apparent_encoding
-        except Exception:
-            pass
-        html = resp.text or ""
-
-        # 1) Try explicit "元/吨" pattern first (often appears next to price)
-        patterns = [
-            r"(\d{1,3}(?:,\d{3})*(?:\.\d+)?)\s*元/吨",
-            # fallback: numbers in a big font area; keep it conservative (>=4 digits)
-            r">\s*(\d{4,}(?:,\d{3})*(?:\.\d+)?)\s*<",
-        ]
-        candidates = []
-        for pat in patterns:
-            for mm in re.finditer(pat, html):
-                val = mm.group(1)
-                if not val:
-                    continue
-                try:
-                    num = float(val.replace(",", ""))
-                    if num > 0:
-                        candidates.append(num)
-                except Exception:
-                    pass
-
-        price = max(candidates) if candidates else None
-
-        # Update time (optional)
-        upd = None
-        mt = re.search(r"更新时间\s*[:：]\s*([0-9]{2}-[0-9]{2}\s*[0-9]{2}:[0-9]{2})", html)
-        if mt:
-            upd = mt.group(1)
-
-        result = {
-            "price": float(price) if (price is not None and price > 0) else None,
-            "source": "100ppi:rawmex/detail-733 基准价格",
-            "detail": (f"页面更新时间: {upd}" if upd else "抓取成功"),
-            "is_simulated": False if (price is not None and price > 0) else True,
-            "url": url,
-            "fetched_at": now.strftime("%Y-%m-%d %H:%M"),
-        }
-
-        # Cache only if success
-        if result["price"] is not None and not result["is_simulated"]:
-            try:
-                self.cache_spot_100ppi[cache_key] = dict(result)
-                self.cache_spot_100ppi_time[cache_key] = now
-            except Exception:
-                pass
-
-        if result["price"] is None:
-            result["detail"] = "抓取失败：未能在页面中解析到价格字段"
-        return result
-
-    except Exception as e:
-        return {
-            "price": None,
-            "source": "100ppi:rawmex/detail-733 基准价格",
-            "detail": f"抓取失败: {e}",
-            "is_simulated": True,
-            "url": url,
-            "fetched_at": now.strftime("%Y-%m-%d %H:%M"),
-        }
-
 
     def hedge_calculation(
 
@@ -2216,9 +2204,11 @@ def _series_last_bool(df: 'pd.DataFrame', col: str, default: bool = False) -> bo
         return default
 
 def render_basis_page(analyzer):
-    """渲染期货-基准价价差页面（基准价：生意社 100ppi 页面抓取）"""
-    st.markdown("<h1>期货-现货基准价差走势</h1>", unsafe_allow_html=True)
-    st.markdown("现货价格口径：生意社（100ppi）页面“基准价格”（统计口径），用于基差/价差测算。")
+    """渲染期货-市场参考价差页面（降级：市场参考价为统计口径，非现货成交价）"""
+    st.markdown("<h1>期货-市场参考价差走势</h1>", unsafe_allow_html=True)
+
+    # 免责声明（普通字体，不标红）
+    st.markdown("当前所用价格为行业市场参考价（统计口径），非现货成交价。")
 
     col_left, col_right = st.columns([2, 1])
     with col_left:
@@ -2233,42 +2223,87 @@ def render_basis_page(analyzer):
             index=2,
         )
 
-    # 现货基准价：100ppi 页面
-    url = "https://www.100ppi.com/rawmex/detail-733.html"
-    spot_info = analyzer.fetch_100ppi_benchmark_price(url=url, force_refresh=st.session_state.get("force_refresh", False))
-    spot_price = spot_info.get("price")
-    spot_source = spot_info.get("source", "")
-    spot_detail = spot_info.get("detail", "")
-    spot_is_sim = bool(spot_info.get("is_simulated", True))
+    # 市场参考价（统计口径）：使用 AkShare futures_spot_price（文档说明来自生意社）
+    # 先列出当日可用“锂”相关条目，允许用户选择具体品类/地区（避免因名称不匹配导致 empty）
+    spot_items_info = analyzer.list_spot_items(keyword="锂")
+    spot_items = spot_items_info.get("items", []) if isinstance(spot_items_info, dict) else []
+    default_item = "碳酸锂"
+    if spot_items and (default_item not in spot_items):
+        # 尝试选择包含“碳酸锂”的条目
+        for it in spot_items:
+            if "碳酸锂" in str(it):
+                default_item = it
+                break
+        else:
+            default_item = spot_items[0]
+
+    selected_item = st.session_state.get("basis_spot_item", default_item)
+    if spot_items:
+        selected_item = st.selectbox(
+            "市场参考价条目匹配（统计口径，生意社/AKShare）",
+            spot_items,
+            index=(spot_items.index(default_item) if default_item in spot_items else 0),
+        )
+        st.session_state["basis_spot_item"] = selected_item
+        st.caption(f"条目列表来源：{spot_items_info.get('source','')}；{spot_items_info.get('detail','')}")
+    else:
+        st.caption(f"市场参考价条目列表获取失败：{spot_items_info.get('detail','') if isinstance(spot_items_info, dict) else ''}")
+
+    spot_info = analyzer.fetch_spot_reference_price(item_query=str(selected_item or default_item))
+    ref_price = spot_info.get("price")
+    ref_source = spot_info.get("source", "")
+    ref_detail = spot_info.get("detail", "")
+    ref_is_sim = bool(spot_info.get("is_simulated", True))
+
+    # 允许用上次成功值兜底（仍视为“缓存”，不算模拟，但需要提示“非实时”）
+    if (ref_price is None) and ("basis_ref_price_cache" in st.session_state):
+        ref_price = float(st.session_state.get("basis_ref_price_cache"))
+        ref_is_sim = False
+        ref_source = (ref_source + "+CACHE").strip("+")
+        ref_detail = "使用上次成功获取的缓存值（非实时）。"
+
+    # 最终用于展示的“市场参考价”
+    display_ref_price = float(ref_price) if (ref_price is not None and ref_price > 0) else None
 
     with col_right:
-        st.markdown("### 现货基准价（生意社 100ppi）")
-        if spot_price is None or float(spot_price) <= 0:
-            st.markdown("**现货基准价：暂无**")
-            st.caption(f"来源：{spot_source}；{spot_detail}")
+        st.markdown("### 市场参考价（统计口径）")
+
+        # 公开统计口径参考价（可能不存在/不可用）
+        if (ref_price is None) or (float(ref_price) <= 0):
+            st.markdown("**市场参考价：暂无**")
+            st.caption(f"来源：{ref_source}；{ref_detail}")
+            st.info("未能从公开统计口径获取该品种的市场参考价。请在下方输入“测算基准价”用于价差演示。")
+        else:
+            st.metric("市场参考价", f"{float(ref_price):,.0f} 元/吨")
+            st.caption(f"来源：{ref_source}；{ref_detail}")
+
+        # 用户输入声明：若非企业真实成交/合同价，则视为模拟/估算
+        user_confirm_real = st.checkbox(
+            "我确认下方输入价格为企业真实成交/合同价（将不再视为模拟数据）",
+            value=bool(st.session_state.get("basis_user_confirm_real", False)),
+            key="basis_user_confirm_real",
+        )
+
+        # 测算基准价（可覆盖），默认优先使用市场参考价；否则为 0
+        default_calc = float(ref_price) if (ref_price is not None and float(ref_price) > 0) else 0.0
+        analysis_ref_price = st.number_input(
+            "测算基准价（可手动输入，用于价差计算）",
+            min_value=0.0,
+            value=float(st.session_state.get("basis_analysis_ref_price", default_calc)),
+            step=500.0,
+        )
+        st.session_state.basis_analysis_ref_price = analysis_ref_price
+
+        # 若数据源失败/缺失且未声明为企业真实成交/合同价，按长期约束：必须红字提示“模拟数据，禁止用于对外报告”
+        if (not user_confirm_real) and ((ref_is_sim) or (ref_price is None) or (float(ref_price) <= 0)):
             st.markdown(
                 "<div style='color:#b00020;font-weight:700'>当前为模拟数据，禁止用于对外报告</div>",
                 unsafe_allow_html=True,
             )
-            # 允许手动输入做演示（仍视为模拟，必须红字）
-            analysis_spot_price = st.number_input(
-                "测算基准价（手动输入，仅用于演示）",
-                min_value=0.0,
-                value=float(st.session_state.get("basis_analysis_ref_price", 0.0)),
-                step=500.0,
-            )
-            st.session_state.basis_analysis_ref_price = analysis_spot_price
-        else:
-            st.metric("现货基准价", f"{float(spot_price):,.0f} 元/吨")
-            st.caption(f"来源：{spot_source}；{spot_detail}")
-            # 默认用抓取到的基准价进行计算（可覆盖）
-            analysis_spot_price = st.number_input(
-                "测算基准价（可手动覆盖，用于计算）",
-                min_value=0.0,
-                value=float(st.session_state.get("basis_analysis_ref_price", float(spot_price))),
-                step=500.0,
-            )
-            st.session_state.basis_analysis_ref_price = analysis_spot_price
+
+        # 存缓存（仅当拿到真实值时）
+        if (ref_price is not None) and (ref_price > 0) and (not ref_is_sim):
+            st.session_state.basis_ref_price_cache = float(ref_price)
 
     period_map = {"最近1个月": 30, "最近3个月": 90, "最近6个月": 180, "最近1年": 365}
 
@@ -2299,51 +2334,52 @@ def render_basis_page(analyzer):
         if "日期" in display_data.columns:
             display_data["日期"] = pd.to_datetime(display_data["日期"], errors="coerce")
 
-    # 基差/价差 = 现货基准价 - 期货主力（你之前要求用“现货均价-期货主力”口径）
-    display_data["基差"] = analysis_spot_price - display_data["收盘价"]
+    # 价差 = 期货主力 - 市场参考价（测算基准价）
+    display_data["价差"] = display_data["收盘价"] - analysis_ref_price
 
     latest_futures = float(display_data["收盘价"].iloc[-1])
-    latest_basis = analysis_spot_price - latest_futures
+    latest_diff = latest_futures - analysis_ref_price
     update_time = display_data["日期"].iloc[-1]
 
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("现货基准价（100ppi）", ("暂无" if spot_price is None else f"{float(spot_price):,.0f} 元/吨"))
-    col_m2.metric("测算基准价（用于计算）", f"{analysis_spot_price:,.0f} 元/吨")
+    col_m1.metric("市场参考价（统计口径）", ("暂无" if display_ref_price is None else f"{display_ref_price:,.0f} 元/吨"))
+    col_m2.metric("测算基准价（用于计算）", f"{analysis_ref_price:,.0f} 元/吨")
     col_m3.metric("期货基准价（主力/LC）", f"{latest_futures:,.0f} 元/吨")
-    col_m4.metric("实时基差（现货基准价 - 期货主力）", f"{latest_basis:+,.0f} 元/吨")
+    col_m4.metric("实时价差（期货主力 - 测算基准价）", f"{latest_diff:+,.0f} 元/吨")
 
     st.caption(f"期货数据更新时间：{update_time.strftime('%Y-%m-%d')}")
 
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(display_data["日期"], display_data["基差"], linewidth=2.2)
+    ax.plot(display_data["日期"], display_data["价差"], linewidth=2.2)
     ax.axhline(0, linestyle="--", linewidth=1)
-    ax.set_title("基差走势（现货基准价 - 期货主力）", fontsize=15, fontweight="bold")
+    ax.set_title("价差走势（期货主力 - 市场参考价）", fontsize=15, fontweight="bold")
     ax.set_xlabel("日期")
-    ax.set_ylabel("基差 (元/吨)")
+    ax.set_ylabel("价差 (元/吨)")
     ax.grid(True, alpha=0.3, linestyle="--")
     plt.xticks(rotation=30)
     plt.tight_layout()
     st.pyplot(fig)
 
-    # 写入 session，供“分析报告”等模块复用
+    # 兼容旧字段：basis/spot_price 仍保留，但含义已调整为“期货-市场参考价差/测算基准价”
     st.session_state.basis_data = {
-        "spot_price": analysis_spot_price,           # 用于计算的现货基准价
-        "ref_spot_price": float(spot_price) if spot_price is not None else None,
-        "ref_spot_source": f"{spot_source} ({url})",
-        "analysis_spot_price": analysis_spot_price,
+        "spot_price": analysis_ref_price,           # 旧字段：代表“测算基准价”
+        "ref_spot_price": display_ref_price,        # 旧字段：代表“市场参考价”
+        "ref_spot_source": ref_source,
+        "analysis_spot_price": analysis_ref_price,  # 旧字段：代表“测算基准价”
         "futures_price": latest_futures,
-        "basis": latest_basis,
-        "diff": latest_basis,
+        "basis": latest_diff,                       # 旧字段：代表“价差”
+        "diff": latest_diff,
         "update_time": update_time,
     }
 
     st.markdown("#### 数据说明")
     st.markdown(
-        """- 现货基准价：生意社（100ppi）页面抓取的“基准价格”
+        """- 市场参考价：行业市场参考价（统计口径，来源：生意社，经 AkShare `futures_spot_price` 获取）
 - 期货：AkShare `futures_zh_daily_sina`（新浪财经日频）
-- 基差 = 现货基准价 - 期货主力
+- 价差 = 期货主力 - 市场参考价（测算基准价）
 """
     )
+
 
 def render_inventory_page(analyzer):
     """库存管理（MVP）"""
