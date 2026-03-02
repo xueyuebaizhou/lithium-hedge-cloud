@@ -319,6 +319,74 @@ class CloudUserAuth:
                 except Exception as e:
                     return False, f"更新设置失败: {e}"
         return False, "后端未提供设置更新接口"
+
+
+# =========================
+# User info extraction helper
+# =========================
+def _extract_user_info_from_login_result(result, username_fallback: str = "") -> dict:
+    """Normalize various Supabase/helper login returns into a dict with user_id/username/email/settings."""
+    info: dict = {}
+    try:
+        if isinstance(result, dict):
+            info = dict(result)
+        else:
+            # supabase-py AuthResponse style: result.user / result.session
+            if hasattr(result, "user") and getattr(result, "user") is not None:
+                u = getattr(result, "user")
+                info["user_id"] = getattr(u, "id", None) or getattr(u, "user_id", None)
+                info["email"] = getattr(u, "email", None)
+                um = getattr(u, "user_metadata", None)
+                if isinstance(um, dict):
+                    info["username"] = um.get("username") or um.get("name")
+
+            # some wrappers use result.data.user
+            if (not info.get("user_id")) and hasattr(result, "data") and getattr(result, "data") is not None:
+                d = getattr(result, "data")
+                u = None
+                if isinstance(d, dict):
+                    u = d.get("user") or d.get("profile")
+                else:
+                    u = getattr(d, "user", None)
+                if u is not None:
+                    if isinstance(u, dict):
+                        info["user_id"] = u.get("id") or u.get("user_id")
+                        info["email"] = u.get("email")
+                        um = u.get("user_metadata")
+                        if isinstance(um, dict):
+                            info["username"] = um.get("username") or um.get("name")
+                    else:
+                        info["user_id"] = getattr(u, "id", None) or getattr(u, "user_id", None)
+                        info["email"] = getattr(u, "email", None)
+                        um = getattr(u, "user_metadata", None)
+                        if isinstance(um, dict):
+                            info["username"] = um.get("username") or um.get("name")
+
+            # direct attributes
+            if not info.get("user_id") and hasattr(result, "id"):
+                info["user_id"] = getattr(result, "id", None)
+            if not info.get("email") and hasattr(result, "email"):
+                info["email"] = getattr(result, "email", None)
+    except Exception:
+        info = info or {}
+
+    username = (info.get("username") or username_fallback or "").strip()
+    raw_uid = info.get("user_id") or info.get("id")
+    user_id = raw_uid.strip() if isinstance(raw_uid, str) else raw_uid
+    settings = info.get("settings") if isinstance(info.get("settings"), dict) else {}
+
+    # If still no user_id, fall back to username as key for MVP (keep app usable)
+    if not user_id and username:
+        user_id = f"user::{username}"
+
+    return {
+        "user_id": user_id,
+        "username": username or username_fallback or "用户",
+        "email": info.get("email"),
+        "settings": settings,
+    }
+
+
 class CloudLithiumAnalyzer:
     """Main application service layer.
 
@@ -347,63 +415,6 @@ class CloudLithiumAnalyzer:
             import matplotlib as mpl
             from matplotlib import font_manager
 
-
-# =========================
-# User info extraction helper
-# =========================
-def _extract_user_info_from_login_result(result, username_fallback: str = "") -> dict:
-    """Best-effort normalize various Supabase/helper login returns into a dict with user_id/username/email/settings."""
-    info = {}
-    try:
-        if isinstance(result, dict):
-            info = dict(result)
-        else:
-            # supabase-py AuthResponse style: result.user / result.session
-            if hasattr(result, "user") and getattr(result, "user") is not None:
-                u = getattr(result, "user")
-                info["user_id"] = getattr(u, "id", None) or getattr(u, "user_id", None)
-                info["email"] = getattr(u, "email", None)
-                # username may be in user_metadata
-                um = getattr(u, "user_metadata", None)
-                if isinstance(um, dict):
-                    info["username"] = um.get("username") or um.get("name")
-            # some wrappers use result.data.user
-            if (not info.get("user_id")) and hasattr(result, "data") and getattr(result, "data") is not None:
-                d = getattr(result, "data")
-                u = None
-                if isinstance(d, dict):
-                    u = d.get("user") or d.get("profile")
-                else:
-                    u = getattr(d, "user", None)
-                if u is not None:
-                    info["user_id"] = getattr(u, "id", None) or (u.get("id") if isinstance(u, dict) else None)
-                    info["email"] = getattr(u, "email", None) or (u.get("email") if isinstance(u, dict) else None)
-                    if isinstance(u, dict):
-                        um = u.get("user_metadata")
-                        if isinstance(um, dict):
-                            info["username"] = um.get("username") or um.get("name")
-            # direct attributes
-            if not info.get("user_id") and hasattr(result, "id"):
-                info["user_id"] = getattr(result, "id", None)
-            if not info.get("email") and hasattr(result, "email"):
-                info["email"] = getattr(result, "email", None)
-    except Exception:
-        info = info or {}
-
-    username = (info.get("username") or username_fallback or "").strip()
-    user_id = (info.get("user_id") or info.get("id") or "").strip() if isinstance(info.get("user_id") or info.get("id"), str) else (info.get("user_id") or info.get("id"))
-    settings = info.get("settings") if isinstance(info.get("settings"), dict) else {}
-
-    # If still no user_id, fall back to username as key for MVP (keep app usable)
-    if not user_id and username:
-        user_id = f"user::{username}"
-
-    return {
-        "user_id": user_id,
-        "username": username or username_fallback or "用户",
-        "email": info.get("email"),
-        "settings": settings,
-    }
             preferred = [
                 "Noto Sans CJK SC",
                 "Noto Sans CJK",
