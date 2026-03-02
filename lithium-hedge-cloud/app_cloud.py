@@ -2328,13 +2328,20 @@ def _series_last_bool(df: 'pd.DataFrame', col: str, default: bool = False) -> bo
         return default
 
 def render_basis_page(analyzer):
-    """渲染期货-市场参考价差页面（降级：市场参考价为统计口径，非现货成交价）"""
+    """渲染期货-市场参考价差页面（降级：市场参考价为统计口径，非现货成交价）
+
+    说明：
+    - 期货价格：AkShare `futures_zh_daily_sina`（新浪财经日频）
+    - 市场参考价：AkShare `futures_spot_price`（公开统计口径，来源通常为生意社等公开站点）
+    - 价差（展示）：期货主力 - 测算基准价
+    """
     st.markdown("<h1>期货-市场参考价差走势</h1>", unsafe_allow_html=True)
 
     # 免责声明（普通字体，不标红）
     st.markdown("当前所用价格为行业市场参考价（统计口径），非现货成交价。")
 
     col_left, col_right = st.columns([2, 1])
+
     with col_left:
         symbol = st.selectbox(
             "选择期货主力合约",
@@ -2347,24 +2354,50 @@ def render_basis_page(analyzer):
             index=2,
         )
 
+    # ==========================
+    # 市场参考价（统计口径）：AkShare futures_spot_price
+    # ==========================
+    with st.container():
+        c1, c2, c3 = st.columns([1, 1, 2])
+        with c1:
+            spot_date = st.date_input("市场参考价日期（统计口径）", value=datetime.now().date())
+        with c2:
+            keyword = st.text_input("品种关键字（用于筛选）", value="碳酸锂")
+        with c3:
+            st.caption("数据来源为公开统计口径（AkShare futures_spot_price）。若获取失败，可使用缓存或手动输入“测算基准价”。")
 
-    # 现货基准价（生意社 100ppi）：用于基差计算（现货基准价 - 期货主力）
-    DEFAULT_100PPI_URL = "https://www.100ppi.com/rawmex/detail-733.html"
-    url = st.text_input(
-        "生意社基准价URL（碳酸锂-工业级）",
-        value=st.session_state.get("basis_100ppi_url", DEFAULT_100PPI_URL),
-        help="示例：https://www.100ppi.com/rawmex/detail-733.html（碳酸锂-工业级基准价）",
-    )
-    st.session_state["basis_100ppi_url"] = url
+    spot_date_str = spot_date.strftime("%Y%m%d")
 
-    force_refresh = st.checkbox("强制刷新现货基准价（忽略缓存）", value=False)
-    spot_info = analyzer.fetch_100ppi_benchmark_price(url=url, force_refresh=force_refresh)
+    # 拉取可选品种列表（只做轻量筛选，不强依赖）
+    items_info = analyzer.list_spot_items(date=spot_date_str, keyword=keyword)
+    items = items_info.get("items") or []
+    items_source = items_info.get("source", "AkShare:futures_spot_price")
+    items_detail = items_info.get("detail", "")
+    items_is_sim = bool(items_info.get("is_simulated", False))
 
+    # 默认选择：尽量选“碳酸锂”相关条目
+    default_idx = 0
+    if items:
+        for i, it in enumerate(items):
+            if ("碳酸锂" in str(it)) or ("Lithium" in str(it)):
+                default_idx = i
+                break
+
+    chosen_item = None
+    if items:
+        chosen_item = st.selectbox("选择市场参考价品种条目", items, index=default_idx)
+        st.caption(f"条目列表来源：{items_source}；{items_detail}")
+    else:
+        st.warning(f"未获取到可选品种条目（{items_source}；{items_detail}）。将尝试直接按关键字获取。")
+        chosen_item = keyword or "碳酸锂"
+
+    # 获取市场参考价（统计口径）
+    # 这里使用 AkShare futures_spot_price 的结构化表格结果，而非网页爬虫
+    spot_info = analyzer.fetch_spot_reference_price(item_query=str(chosen_item or keyword or "碳酸锂"), date=spot_date_str)
     ref_price = spot_info.get("price")
-    ref_source = spot_info.get("source", "100ppi")
+    ref_source = spot_info.get("source", "AkShare:futures_spot_price")
     ref_detail = spot_info.get("detail", "")
     ref_is_sim = bool(spot_info.get("is_simulated", True))
-
 
     # 允许用上次成功值兜底（仍视为“缓存”，不算模拟，但需要提示“非实时”）
     if (ref_price is None) and ("basis_ref_price_cache" in st.session_state):
@@ -2379,7 +2412,6 @@ def render_basis_page(analyzer):
     with col_right:
         st.markdown("### 市场参考价（统计口径）")
 
-        # 公开统计口径参考价（可能不存在/不可用）
         if (ref_price is None) or (float(ref_price) <= 0):
             st.markdown("**市场参考价：暂无**")
             st.caption(f"来源：{ref_source}；{ref_detail}")
@@ -2405,7 +2437,7 @@ def render_basis_page(analyzer):
         )
         st.session_state.basis_analysis_ref_price = analysis_ref_price
 
-        # 若数据源失败/缺失且未声明为企业真实成交/合同价，按长期约束：必须红字提示“模拟数据，禁止用于对外报告”
+        # 若数据源失败/缺失且未声明为企业真实成交/合同价，按长期约束：必须红字提示
         if (not user_confirm_real) and ((ref_is_sim) or (ref_price is None) or (float(ref_price) <= 0)):
             st.markdown(
                 "<div style='color:#b00020;font-weight:700'>当前为模拟数据，禁止用于对外报告</div>",
@@ -2416,6 +2448,9 @@ def render_basis_page(analyzer):
         if (ref_price is not None) and (ref_price > 0) and (not ref_is_sim):
             st.session_state.basis_ref_price_cache = float(ref_price)
 
+    # ==========================
+    # 期货数据（真实） & 价差计算
+    # ==========================
     period_map = {"最近1个月": 30, "最近3个月": 90, "最近6个月": 180, "最近1年": 365}
 
     price_data = analyzer.fetch_real_time_data(
@@ -2445,7 +2480,6 @@ def render_basis_page(analyzer):
         if "日期" in display_data.columns:
             display_data["日期"] = pd.to_datetime(display_data["日期"], errors="coerce")
 
-
     # 兼容不同数据源列名（避免 KeyError: '收盘价'）
     if "收盘价" not in display_data.columns:
         for cand in ["收盘", "close", "Close", "收盘价(元)", "结算价", "结算"]:
@@ -2456,7 +2490,7 @@ def render_basis_page(analyzer):
         st.error(f"期货数据缺少收盘价列，无法计算价差。当前列：{list(display_data.columns)}")
         return
 
-    # 价差 = 期货主力 - 市场参考价（测算基准价）
+    # 价差 = 期货主力 - 测算基准价
     display_data["价差"] = display_data["收盘价"] - analysis_ref_price
 
     latest_futures = float(display_data["收盘价"].iloc[-1])
@@ -2496,12 +2530,11 @@ def render_basis_page(analyzer):
 
     st.markdown("#### 数据说明")
     st.markdown(
-        """- 市场参考价：行业市场参考价（统计口径，来源：生意社，经 AkShare `futures_spot_price` 获取）
+        """- 市场参考价：公开市场参考价（统计口径，来源：AkShare `futures_spot_price`；口径来自公开站点）
 - 期货：AkShare `futures_zh_daily_sina`（新浪财经日频）
-- 价差 = 期货主力 - 市场参考价（测算基准价）
+- 价差 = 期货主力 - 测算基准价
 """
     )
-
 
 def render_inventory_page(analyzer):
     """库存管理（MVP）"""
