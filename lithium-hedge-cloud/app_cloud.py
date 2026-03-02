@@ -347,6 +347,63 @@ class CloudLithiumAnalyzer:
             import matplotlib as mpl
             from matplotlib import font_manager
 
+
+# =========================
+# User info extraction helper
+# =========================
+def _extract_user_info_from_login_result(result, username_fallback: str = "") -> dict:
+    """Best-effort normalize various Supabase/helper login returns into a dict with user_id/username/email/settings."""
+    info = {}
+    try:
+        if isinstance(result, dict):
+            info = dict(result)
+        else:
+            # supabase-py AuthResponse style: result.user / result.session
+            if hasattr(result, "user") and getattr(result, "user") is not None:
+                u = getattr(result, "user")
+                info["user_id"] = getattr(u, "id", None) or getattr(u, "user_id", None)
+                info["email"] = getattr(u, "email", None)
+                # username may be in user_metadata
+                um = getattr(u, "user_metadata", None)
+                if isinstance(um, dict):
+                    info["username"] = um.get("username") or um.get("name")
+            # some wrappers use result.data.user
+            if (not info.get("user_id")) and hasattr(result, "data") and getattr(result, "data") is not None:
+                d = getattr(result, "data")
+                u = None
+                if isinstance(d, dict):
+                    u = d.get("user") or d.get("profile")
+                else:
+                    u = getattr(d, "user", None)
+                if u is not None:
+                    info["user_id"] = getattr(u, "id", None) or (u.get("id") if isinstance(u, dict) else None)
+                    info["email"] = getattr(u, "email", None) or (u.get("email") if isinstance(u, dict) else None)
+                    if isinstance(u, dict):
+                        um = u.get("user_metadata")
+                        if isinstance(um, dict):
+                            info["username"] = um.get("username") or um.get("name")
+            # direct attributes
+            if not info.get("user_id") and hasattr(result, "id"):
+                info["user_id"] = getattr(result, "id", None)
+            if not info.get("email") and hasattr(result, "email"):
+                info["email"] = getattr(result, "email", None)
+    except Exception:
+        info = info or {}
+
+    username = (info.get("username") or username_fallback or "").strip()
+    user_id = (info.get("user_id") or info.get("id") or "").strip() if isinstance(info.get("user_id") or info.get("id"), str) else (info.get("user_id") or info.get("id"))
+    settings = info.get("settings") if isinstance(info.get("settings"), dict) else {}
+
+    # If still no user_id, fall back to username as key for MVP (keep app usable)
+    if not user_id and username:
+        user_id = f"user::{username}"
+
+    return {
+        "user_id": user_id,
+        "username": username or username_fallback or "用户",
+        "email": info.get("email"),
+        "settings": settings,
+    }
             preferred = [
                 "Noto Sans CJK SC",
                 "Noto Sans CJK",
@@ -1198,15 +1255,7 @@ def render_auth_page(analyzer):
                     if success:
                         st.session_state.authenticated = True
                         # result 可能是 dict 或字符串
-                        if isinstance(result, dict):
-                            st.session_state.user_info = {
-                                "user_id": result.get("user_id") or result.get("id"),
-                                "username": result.get("username") or username,
-                                "email": result.get("email"),
-                                "settings": result.get("settings", {}),
-                            }
-                        else:
-                            st.session_state.user_info = {"username": username}
+                        st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=username)
                         st.success("登录成功！")
                         st.rerun()
                     else:
@@ -1253,15 +1302,7 @@ def render_auth_page(analyzer):
                             success, result = analyzer.auth.login(new_username, new_password)
                         if success:
                             st.session_state.authenticated = True
-                            if isinstance(result, dict):
-                                st.session_state.user_info = {
-                                    "user_id": result.get("user_id") or result.get("id"),
-                                    "username": result.get("username") or new_username,
-                                    "email": result.get("email") or new_email,
-                                    "settings": result.get("settings", {}),
-                                }
-                            else:
-                                st.session_state.user_info = {"username": new_username, "email": new_email}
+                            st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=new_username)
                             st.rerun()
                         else:
                             st.info("注册成功，但自动登录失败，请回到“用户登录”手动登录。")
@@ -2334,6 +2375,17 @@ def render_basis_page(analyzer):
         if "日期" in display_data.columns:
             display_data["日期"] = pd.to_datetime(display_data["日期"], errors="coerce")
 
+
+    # 兼容不同数据源列名（避免 KeyError: '收盘价'）
+    if "收盘价" not in display_data.columns:
+        for cand in ["收盘", "close", "Close", "收盘价(元)", "结算价", "结算"]:
+            if cand in display_data.columns:
+                display_data = display_data.rename(columns={cand: "收盘价"})
+                break
+    if "收盘价" not in display_data.columns:
+        st.error(f"期货数据缺少收盘价列，无法计算价差。当前列：{list(display_data.columns)}")
+        return
+
     # 价差 = 期货主力 - 市场参考价（测算基准价）
     display_data["价差"] = display_data["收盘价"] - analysis_ref_price
 
@@ -2391,6 +2443,9 @@ def render_inventory_page(analyzer):
     if not user_id:
         st.error("未获取到用户信息，请重新登录。")
         return
+
+    if isinstance(user_id, str) and user_id.startswith("user::"):
+        st.warning("提示：当前登录返回未包含用户ID，系统临时使用用户名作为云端数据键（仅建议用于演示）。")
 
     tab1, tab2 = st.tabs(["新增记录", "库存总览"])
 
@@ -2476,6 +2531,9 @@ def render_profit_page(analyzer):
     if not user_id:
         st.error("未获取到用户信息，请重新登录。")
         return
+
+    if isinstance(user_id, str) and user_id.startswith("user::"):
+        st.warning("提示：当前登录返回未包含用户ID，系统临时使用用户名作为云端数据键（仅建议用于演示）。")
 
     tab1, tab2 = st.tabs(["新增销售记录", "利润报表"])
 
