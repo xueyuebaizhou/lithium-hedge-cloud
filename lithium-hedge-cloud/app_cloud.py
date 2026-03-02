@@ -1,4 +1,4 @@
-# app_cloud.py - 完整云端版本
+# app_cloud.py - 完整云端版本（v27：现货参考价自动回溯最近有效日）
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -535,76 +535,116 @@ class CloudLithiumAnalyzer:
         df["__is_simulated"] = True
         return df
 
-    def fetch_spot_reference_price(self, item_query: str = "碳酸锂", date: Optional[str] = None) -> dict:
-        """Fetch lithium carbonate spot reference price.
+    
+    def fetch_spot_reference_price(self, item_query: str = "碳酸锂", date: Optional[str] = None, lookback_days: int = 10) -> dict:
+        """Fetch spot *reference* price (public statistical caliber, not transaction price).
 
-        Source: AkShare futures_spot_price(date=YYYYMMDD)
-        Note: AkShare documents that its "现货价格" in this interface is collected from 生意社.
+        Primary source: AkShare `futures_spot_price(date=YYYYMMDD)` (collected from 生意社).
+        Practical note: the *same-day* record often returns empty. We therefore implement a
+        deterministic fallback: search backward up to `lookback_days` calendar days and use
+        the most recent date that returns a non-empty table and matches `item_query`.
 
-        Returns a dict:
+        Returns:
             {
               'price': float | None,
-              'date': 'YYYYMMDD',
+              'date': 'YYYYMMDD',                 # the actual date used (may be earlier than requested)
               'source': str,
               'detail': str,
               'is_simulated': bool
             }
         """
-        from datetime import datetime
+        from datetime import datetime, timedelta
         import pandas as pd
 
-        d = date or datetime.now().strftime('%Y%m%d')
-        try:
-            import akshare as ak
-            spot_df = ak.futures_spot_price(d)
-            if spot_df is None or spot_df.empty:
-                raise ValueError('empty')
+        # Normalize start date
+        start_dt = None
+        if date:
+            s = str(date).strip()
+            try:
+                if re.fullmatch(r"\d{8}", s):
+                    start_dt = datetime.strptime(s, "%Y%m%d")
+                else:
+                    # allow YYYY-MM-DD or other parsable forms
+                    start_dt = pd.to_datetime(s, errors="coerce").to_pydatetime()
+            except Exception:
+                start_dt = None
+        if start_dt is None:
+            start_dt = datetime.now()
 
-            # Normalize columns
-            df = spot_df.copy()
-            # Expected columns include: 商品, 现货价格, ...
-            if '商品' not in df.columns or '现货价格' not in df.columns:
-                # best effort: try alternative names
-                for c in df.columns:
-                    if '商品' in c and '商品' not in df.columns:
-                        df = df.rename(columns={c: '商品'})
-                    if '现货' in c and '价格' in c and '现货价格' not in df.columns:
-                        df = df.rename(columns={c: '现货价格'})
+        q = str(item_query or "碳酸锂").strip()
+        last_err = None
+        attempts = []
 
-            df = df.dropna(subset=['商品', '现货价格'])
-            # Filter target item rows (default: 碳酸锂)
-            q = str(item_query or '碳酸锂')
-            lc = df[df['商品'].astype(str).str.contains(q, na=False)]
-            if lc.empty:
+        for i in range(max(1, int(lookback_days or 10))):
+            d_dt = start_dt - timedelta(days=i)
+            d = d_dt.strftime('%Y%m%d')
+            try:
+                import akshare as ak
+                spot_df = ak.futures_spot_price(d)
+                if spot_df is None or spot_df.empty:
+                    attempts.append(f"{d}: empty")
+                    continue
+
+                df = spot_df.copy()
+
+                # Normalize columns
+                if '商品' not in df.columns or '现货价格' not in df.columns:
+                    for c in df.columns:
+                        if ('商品' in c) and ('商品' not in df.columns):
+                            df = df.rename(columns={c: '商品'})
+                        if ('现货' in c and '价格' in c) and ('现货价格' not in df.columns):
+                            df = df.rename(columns={c: '现货价格'})
+
+                if '商品' not in df.columns or '现货价格' not in df.columns:
+                    attempts.append(f"{d}: missing columns")
+                    continue
+
+                df = df.dropna(subset=['商品', '现货价格'])
+                if df.empty:
+                    attempts.append(f"{d}: empty after dropna")
+                    continue
+
+                lc = df[df['商品'].astype(str).str.contains(q, na=False)]
+                if lc.empty:
+                    attempts.append(f"{d}: no match '{q}'")
+                    continue
+
+                price = float(pd.to_numeric(lc['现货价格'], errors='coerce').dropna().mean())
+                if not (price > 0):
+                    attempts.append(f"{d}: non-positive")
+                    continue
+
+                names = ', '.join(lc['商品'].astype(str).head(5).tolist())
+                # Detail shows if fallback happened
+                if i == 0:
+                    detail = f"匹配条目示例: {names}"
+                else:
+                    detail = f"当日无数据/不可用，已回溯至 {d}（回溯{i}天）。匹配条目示例: {names}"
+
                 return {
-                    'price': None,
+                    'price': price,
                     'date': d,
                     'source': 'AkShare:futures_spot_price(生意社)',
-                    'detail': f'当日基差表中未匹配到“{q}”条目',
-                    'is_simulated': True,
+                    'detail': detail,
+                    'is_simulated': False,
                 }
-            # Use average spot price across matched rows
-            price = float(pd.to_numeric(lc['现货价格'], errors='coerce').dropna().mean())
-            if not (price > 0):
-                raise ValueError('non-positive')
-            names = ', '.join(lc['商品'].astype(str).head(5).tolist())
-            return {
-                'price': price,
-                'date': d,
-                'source': 'AkShare:futures_spot_price(生意社)',
-                'detail': f'匹配条目示例: {names}',
-                'is_simulated': False,
-            }
-        except Exception as e:
-            return {
-                'price': None,
-                'date': d,
-                'source': 'AkShare:futures_spot_price(生意社)',
-                'detail': f'获取失败: {e}',
-                'is_simulated': True,
-            }
+            except Exception as e:
+                last_err = e
+                attempts.append(f"{d}: error")
+                continue
 
+        # Fail: no usable public reference price found in lookback window
+        detail = f"回溯{lookback_days}天仍未获得有效数据；尝试记录: {', '.join(attempts[:8])}{'...' if len(attempts)>8 else ''}"
+        if last_err is not None:
+            detail += f"；最后错误: {last_err}"
 
+        return {
+            'price': None,
+            'date': start_dt.strftime('%Y%m%d'),
+            'source': 'AkShare:futures_spot_price(生意社)',
+            'detail': detail,
+            'is_simulated': True,
+        }
 
     def fetch_100ppi_benchmark_price(self, url: str, force_refresh: bool = False, cache_minutes: int = 30) -> dict:
         """Fetch benchmark spot price from 100ppi (生意社) detail page.
