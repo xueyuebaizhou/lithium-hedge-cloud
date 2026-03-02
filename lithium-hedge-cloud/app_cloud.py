@@ -609,9 +609,17 @@ class CloudLithiumAnalyzer:
     def fetch_100ppi_benchmark_price(self, url: str, force_refresh: bool = False, cache_minutes: int = 30) -> dict:
         """Fetch benchmark spot price from 100ppi (生意社) detail page.
 
+        This is a best-effort scraper. 100ppi pages sometimes use dynamic rendering / anti-bot.
+        We therefore:
+        - set a browser-like UA + headers
+        - keep a session (cookies)
+        - try multiple regex patterns for price + unit + update time
+        - cache successful results per URL
+
         Returns:
-            dict with keys: price(float|None), unit(str), source(str), url(str),
-            update_time(str|None), is_simulated(bool), detail(str)
+            dict with keys:
+              price(float|None), unit(str), source(str), url(str), update_time(str|None),
+              is_simulated(bool), detail(str)
         """
         try:
             # cache key per-url
@@ -632,29 +640,61 @@ class CloudLithiumAnalyzer:
                         "detail": "缓存命中（非强制刷新）",
                     }
 
+            sess = requests.Session()
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/122.0.0.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
                 "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Connection": "keep-alive",
+                "Referer": "https://www.100ppi.com/",
+                "Upgrade-Insecure-Requests": "1",
             }
-            r = requests.get(url, headers=headers, timeout=12)
+
+            r = sess.get(url, headers=headers, timeout=15)
             r.raise_for_status()
+
             html = r.text or ""
+            if (not html) and r.content:
+                try:
+                    html = r.content.decode("utf-8", errors="ignore")
+                except Exception:
+                    html = r.content.decode(errors="ignore")
 
-            # Price: prefer pattern like '170000.00 元/吨' (allow commas)
-            price = None
             unit = "元/吨"
-            m_price = re.search(r'([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*元/吨', html)
-            if not m_price:
-                # fallback: sometimes appears in JS or meta, still followed by '元/吨'
-                m_price = re.search(r'([0-9]{4,})\s*元/吨', html)
-            if m_price:
-                price = float(m_price.group(1).replace(",", ""))
+            price = None
 
-            # Update time: try common patterns '更新时间：03-02 16:00'
+            patterns = [
+                r'new_price[^>]*>\s*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*<',
+                r'([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?)\s*元/吨',
+                r'现价[^0-9]*([0-9]{1,3}(?:,[0-9]{3})*(?:\.[0-9]+)?)',
+                r'"price"\s*:\s*"?(\d+(?:\.\d+)?)"?',
+            ]
+            for pat in patterns:
+                m_price = re.search(pat, html, flags=re.I)
+                if m_price:
+                    try:
+                        price = float(m_price.group(1).replace(",", ""))
+                        break
+                    except Exception:
+                        price = None
+
             update_time = None
-            m_ut = re.search(r'更新\s*时间[：:\s]*([0-9]{2}-[0-9]{2}\s*[0-9]{2}:[0-9]{2})', html)
-            if m_ut:
-                update_time = m_ut.group(1).strip()
+            ut_patterns = [
+                r'更新\s*时间[：:\s]*([0-9]{2}-[0-9]{2}\s*[0-9]{2}:[0-9]{2})',
+                r'更新\s*时间[：:\s]*([0-9]{4}-[0-9]{2}-[0-9]{2}\s*[0-9]{2}:[0-9]{2})',
+                r'更新时间[：:\s]*([0-9]{2}-[0-9]{2}\s*[0-9]{2}:[0-9]{2})',
+                r'更新时间[：:\s]*([0-9]{4}-[0-9]{2}-[0-9]{2}\s*[0-9]{2}:[0-9]{2})',
+            ]
+            for pat in ut_patterns:
+                m_ut = re.search(pat, html)
+                if m_ut:
+                    update_time = m_ut.group(1).strip()
+                    break
 
             if (price is None) or (price <= 0):
                 return {
@@ -664,10 +704,12 @@ class CloudLithiumAnalyzer:
                     "url": url,
                     "update_time": update_time,
                     "is_simulated": True,
-                    "detail": "页面解析未得到有效价格字段（可能是页面结构变更或被反爬）。",
+                    "detail": "页面解析未得到有效价格字段（可能是页面结构变更 / 动态渲染 / 反爬拦截）。建议："
+                              "1) 先在浏览器打开确认页面可访问；"
+                              "2) 换一个生意社品种详情页 URL；"
+                              "3) 或使用 AkShare futures_spot_price 作为统计口径来源。",
                 }
 
-            # store to cache as a 1-row df for compatibility
             cache_df = pd.DataFrame([{
                 "price": price,
                 "unit": unit,
@@ -697,6 +739,7 @@ class CloudLithiumAnalyzer:
                 "is_simulated": True,
                 "detail": f"抓取失败：{e}",
             }
+
 
     def list_spot_items(self, date: Optional[str] = None, keyword: str = "锂") -> dict:
         """List available spot item names from AkShare futures_spot_price.
@@ -856,6 +899,8 @@ class CloudLithiumAnalyzer:
         record = dict(record or {})
         record.setdefault("user_id", user_id)
         record.setdefault("created_at", datetime.utcnow().isoformat())
+        record.setdefault("analysis_id", hashlib.md5((record.get("created_at","")+json.dumps(record,ensure_ascii=False,sort_keys=True)).encode("utf-8")).hexdigest())
+        record.setdefault("analysis_type", record.get("record_type","analysis"))
         try:
             if hasattr(self, "supabase") and self.supabase:
                 # Supabase python client style
@@ -867,6 +912,29 @@ class CloudLithiumAnalyzer:
         try:
             st.session_state.setdefault("_analysis_history", [])
             st.session_state["_analysis_history"].append(record)
+            return True
+        except Exception:
+            return False
+
+
+    def delete_history_record(self, analysis_id: str) -> bool:
+        """Delete a history record by analysis_id (best-effort).
+
+        If Supabase is available, delete from analysis_history table.
+        Otherwise, delete from local session cache.
+        """
+        if not analysis_id:
+            return False
+        try:
+            if hasattr(self, "supabase") and self.supabase:
+                self.supabase.table("analysis_history").delete().eq("analysis_id", analysis_id).execute()
+                return True
+        except Exception:
+            pass
+        try:
+            hist = st.session_state.get("_analysis_history", [])
+            new_hist = [r for r in hist if (r or {}).get("analysis_id") != analysis_id]
+            st.session_state["_analysis_history"] = new_hist
             return True
         except Exception:
             return False
@@ -1138,6 +1206,8 @@ def main():
         st.session_state.authenticated = False
     if 'user_info' not in st.session_state:
         st.session_state.user_info = None
+    if 'user_id' not in st.session_state:
+        st.session_state.user_id = None
     if 'current_page' not in st.session_state:
         st.session_state.current_page = "首页"
     if 'show_forgot_password' not in st.session_state:
@@ -1267,6 +1337,7 @@ def render_auth_page(analyzer):
                         st.session_state.authenticated = True
                         # result 可能是 dict 或字符串
                         st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=username)
+                        st.session_state.user_id = st.session_state.user_info.get('user_id')
                         st.success("登录成功！")
                         st.rerun()
                     else:
@@ -1314,6 +1385,7 @@ def render_auth_page(analyzer):
                         if success:
                             st.session_state.authenticated = True
                             st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=new_username)
+                            st.session_state.user_id = st.session_state.user_info.get('user_id')
                             st.rerun()
                         else:
                             st.info("注册成功，但自动登录失败，请回到“用户登录”手动登录。")
@@ -2437,9 +2509,22 @@ def render_inventory_page(analyzer):
     st.caption("用于记录入库/出库台账，自动汇总当前库存，并与套保计算/利润管理联动。")
 
     user_info = st.session_state.get("user_info") or {}
-    user_id = user_info.get("user_id") or user_info.get("id") or ""
+    user_id = (
+        user_info.get("user_id")
+        or user_info.get("id")
+        or st.session_state.get("user_id")
+        or ""
+    )
+
+    # Ultimate fallback: derive from username to keep MVP usable
+    if (not user_id) and isinstance(user_info, dict):
+        uname = (user_info.get("username") or "").strip()
+        if uname:
+            user_id = f"user::{uname}"
+            st.session_state.user_id = user_id
+
     if not user_id:
-        st.error("未获取到用户信息，请重新登录。")
+        st.error("未获取到用户ID（登录返回未包含 user.id）。请重新登录，或检查 Supabase Auth 返回。")
         return
 
     if isinstance(user_id, str) and user_id.startswith("user::"):
@@ -2525,9 +2610,22 @@ def render_profit_page(analyzer):
     st.caption("基于销售记录与库存成本台账，输出毛利；可结合套保结果形成“综合利润（含套保）”。")
 
     user_info = st.session_state.get("user_info") or {}
-    user_id = user_info.get("user_id") or user_info.get("id") or ""
+    user_id = (
+        user_info.get("user_id")
+        or user_info.get("id")
+        or st.session_state.get("user_id")
+        or ""
+    )
+
+    # Ultimate fallback: derive from username to keep MVP usable
+    if (not user_id) and isinstance(user_info, dict):
+        uname = (user_info.get("username") or "").strip()
+        if uname:
+            user_id = f"user::{uname}"
+            st.session_state.user_id = user_id
+
     if not user_id:
-        st.error("未获取到用户信息，请重新登录。")
+        st.error("未获取到用户ID（登录返回未包含 user.id）。请重新登录，或检查 Supabase Auth 返回。")
         return
 
     if isinstance(user_id, str) and user_id.startswith("user::"):
