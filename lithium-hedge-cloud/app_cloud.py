@@ -2275,37 +2275,24 @@ def render_basis_page(analyzer):
             index=2,
         )
 
-    # 市场参考价（统计口径）：使用 AkShare futures_spot_price（文档说明来自生意社）
-    # 先列出当日可用“锂”相关条目，允许用户选择具体品类/地区（避免因名称不匹配导致 empty）
-    spot_items_info = analyzer.list_spot_items(keyword="锂")
-    spot_items = spot_items_info.get("items", []) if isinstance(spot_items_info, dict) else []
-    default_item = "碳酸锂"
-    if spot_items and (default_item not in spot_items):
-        # 尝试选择包含“碳酸锂”的条目
-        for it in spot_items:
-            if "碳酸锂" in str(it):
-                default_item = it
-                break
-        else:
-            default_item = spot_items[0]
 
-    selected_item = st.session_state.get("basis_spot_item", default_item)
-    if spot_items:
-        selected_item = st.selectbox(
-            "市场参考价条目匹配（统计口径，生意社/AKShare）",
-            spot_items,
-            index=(spot_items.index(default_item) if default_item in spot_items else 0),
-        )
-        st.session_state["basis_spot_item"] = selected_item
-        st.caption(f"条目列表来源：{spot_items_info.get('source','')}；{spot_items_info.get('detail','')}")
-    else:
-        st.caption(f"市场参考价条目列表获取失败：{spot_items_info.get('detail','') if isinstance(spot_items_info, dict) else ''}")
+    # 现货基准价（生意社 100ppi）：用于基差计算（现货基准价 - 期货主力）
+    DEFAULT_100PPI_URL = "https://www.100ppi.com/rawmex/detail-733.html"
+    url = st.text_input(
+        "生意社基准价URL（碳酸锂-工业级）",
+        value=st.session_state.get("basis_100ppi_url", DEFAULT_100PPI_URL),
+        help="示例：https://www.100ppi.com/rawmex/detail-733.html（碳酸锂-工业级基准价）",
+    )
+    st.session_state["basis_100ppi_url"] = url
 
-    spot_info = analyzer.fetch_spot_reference_price(item_query=str(selected_item or default_item))
+    force_refresh = st.checkbox("强制刷新现货基准价（忽略缓存）", value=False)
+    spot_info = analyzer.fetch_100ppi_benchmark_price(url=url, force_refresh=force_refresh)
+
     ref_price = spot_info.get("price")
-    ref_source = spot_info.get("source", "")
+    ref_source = spot_info.get("source", "100ppi")
     ref_detail = spot_info.get("detail", "")
     ref_is_sim = bool(spot_info.get("is_simulated", True))
+
 
     # 允许用上次成功值兜底（仍视为“缓存”，不算模拟，但需要提示“非实时”）
     if (ref_price is None) and ("basis_ref_price_cache" in st.session_state):
