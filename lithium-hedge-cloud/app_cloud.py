@@ -1,4 +1,4 @@
-# app_cloud.py - 完整云端版本（v31：准商业级增强：角色权限/审计日志/报告导出；现货内置表；不生成模拟价格）
+# app_cloud.py - 完整云端版本（v32：准商业级增强：报告导出/策略管理/风险模块；现货内置表；不生成模拟价格）
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -22,49 +22,20 @@ from typing import Optional, Dict, Any, List
 warnings.filterwarnings('ignore')
 
 # =========================
-# v31 商业化增强：角色权限/审计日志/报告导出（PDF/Word）
+# v32 商业化增强：报告导出（PDF/Word）+ 策略管理/风险模块（已移除角色与日志权限）
 # 重要合规约束：
 # - 禁止随机游走或任何方式生成模拟价格路径
 # - 仅使用真实历史数据做风险度量（历史法 VaR/CVaR、历史极端情景）
 # - 若数据缺失，UI 必须红字提示“当前为模拟数据，禁止用于对外报告”
 # =========================
 
-ROLE_LABELS = {
-    "admin": "管理员",
-    "manager": "管理者",
-    "trader": "交易员",
-    "finance": "财务",
-    "viewer": "访客",
-}
+ROLE_LABELS = {}  # 角色区分已移除
 
 # 页面可见性（越靠左权限越高）
-PAGE_ROLES = {
-    "首页": {"viewer","finance","trader","manager","admin"},
-    "风险敞口": {"finance","trader","manager","admin"},
-    "套保计算": {"trader","manager","admin"},
-    "价差走势": {"finance","trader","manager","admin"},
-    "库存管理": {"finance","trader","manager","admin"},
-    "利润管理": {"finance","manager","admin"},
-    "期权保险": {"trader","manager","admin"},
-    "多情景分析": {"finance","trader","manager","admin"},
-    "价格行情": {"viewer","finance","trader","manager","admin"},
-    "分析报告": {"finance","trader","manager","admin"},
-    "分析历史": {"finance","trader","manager","admin"},
-    "策略管理": {"trader","manager","admin"},
-    "审计日志": {"manager","admin"},
-    "账号设置": {"viewer","finance","trader","manager","admin"},
-}
+PAGE_ROLES = {}  # 角色区分已移除：不做页面隐藏
 
 # 动作权限
-ACTION_ROLES = {
-    "save_strategy": {"trader","manager","admin"},
-    "delete_strategy": {"manager","admin"},
-    "export_report": {"finance","trader","manager","admin"},
-    "delete_history": {"manager","admin"},
-    "update_settings": {"viewer","finance","trader","manager","admin"},
-    "change_role": {"admin"},
-    "view_audit": {"manager","admin"},
-}
+ACTION_ROLES = {}  # 角色区分已移除：不做权限限制
 
 def _get_role() -> str:
     """v31.1: role/identity separation removed. All users share the same permissions."""
@@ -72,9 +43,8 @@ def _get_role() -> str:
 
 
 def _can(action: str) -> bool:
-    role = _get_role()
-    allowed = ACTION_ROLES.get(action, set())
-    return role in allowed if allowed else True
+    """No role separation: all actions allowed."""
+    return True
 
 def _require(action: str, tip: str = "权限不足，无法执行该操作。") -> bool:
     if _can(action):
@@ -83,7 +53,7 @@ def _require(action: str, tip: str = "权限不足，无法执行该操作。") 
     return False
 
 class AuditLogger:
-    """轻量审计日志：
+    """轻量日志：
     - 优先写入 Supabase 表 audit_logs（若可用）
     - 同时写入 session_state（便于无后端场景演示）
     """
@@ -2277,7 +2247,6 @@ def render_main_app(analyzer):
         "分析报告",
         "分析历史",
         "策略管理",
-        "审计日志",
         "账号设置"
     ]
 
@@ -2327,8 +2296,6 @@ def render_main_app(analyzer):
         render_history_page(analyzer)
     elif st.session_state.current_page == "策略管理":
         render_strategy_page(analyzer)
-    elif st.session_state.current_page == "审计日志":
-        render_audit_page(analyzer)
     elif st.session_state.current_page == "账号设置":
         render_settings_page(analyzer)
 
@@ -4357,49 +4324,6 @@ def render_strategy_page(analyzer):
 
 
 
-def render_audit_page(analyzer):
-    """审计日志（轻量版）：展示关键操作，支持下载。"""
-    st.markdown("<h1>审计日志</h1>", unsafe_allow_html=True)
-
-    if not _require("view_audit", "只有管理者/管理员可查看审计日志。"):
-        return
-
-    logs = st.session_state.get("audit_logs", [])
-    if not logs:
-        st.info("暂无审计日志。提示：登录、保存/删除策略、导出报告、删除历史等操作会自动记录。")
-        return
-
-    df = pd.DataFrame(logs)
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        action_filter = st.selectbox("按动作筛选", options=["全部"] + sorted(df["action"].dropna().unique().tolist()))
-    with c2:
-        user_filter = st.selectbox("按用户筛选", options=["全部"] + sorted(df["username"].dropna().unique().tolist()))
-    with c3:
-        max_rows = st.number_input("显示条数", min_value=10, max_value=5000, value=200, step=10)
-
-    df2 = df.copy()
-    if action_filter != "全部":
-        df2 = df2[df2["action"] == action_filter]
-    if user_filter != "全部":
-        df2 = df2[df2["username"] == user_filter]
-
-    df2 = df2.head(int(max_rows))
-
-    st.dataframe(df2, use_container_width=True)
-
-    col_a, col_b = st.columns(2)
-    with col_a:
-        csv_bytes = df2.to_csv(index=False).encode("utf-8-sig")
-        st.download_button("下载审计日志 CSV", data=csv_bytes, file_name=f"audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
-    with col_b:
-        st.download_button("下载审计日志 JSON", data=json.dumps(logs, ensure_ascii=False, indent=2), file_name=f"audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", mime="application/json", use_container_width=True)
-
-    st.markdown("### 说明")
-    st.caption("审计日志用于企业内控：记录关键操作、操作者、时间与参数摘要。若已配置 Supabase，可将日志同步写入 audit_logs 表。")
-
-
 
 def render_settings_page(analyzer):
     """渲染账号设置页面"""
@@ -4419,7 +4343,6 @@ def render_settings_page(analyzer):
                 st.markdown(f"**用户名**：{user_info['username']}")
                 st.markdown(f"**邮箱**：{user_info['email']}")
                 st.markdown(f"**用户ID**：`{user_info['user_id']}`")
-                st.markdown("**权限**：统一（不区分角色）")
             
             with col_info2:
                 if 'settings' in user_info and user_info['settings']:
