@@ -1,4 +1,4 @@
-# app_cloud.py - 完整云端版本（v30：准商业级升级：基差分解/历史VaR-CVaR/套保比例优化/策略回溯/库存风险热力图；现货内置表）
+# app_cloud.py - 完整云端版本（v31：准商业级增强：角色权限/审计日志/报告导出；现货内置表；不生成模拟价格）
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -20,6 +20,187 @@ import re
 import requests
 from typing import Optional, Dict, Any, List
 warnings.filterwarnings('ignore')
+
+# =========================
+# v31 商业化增强：角色权限/审计日志/报告导出（PDF/Word）
+# 重要合规约束：
+# - 禁止随机游走或任何方式生成模拟价格路径
+# - 仅使用真实历史数据做风险度量（历史法 VaR/CVaR、历史极端情景）
+# - 若数据缺失，UI 必须红字提示“当前为模拟数据，禁止用于对外报告”
+# =========================
+
+ROLE_LABELS = {
+    "admin": "管理员",
+    "manager": "管理者",
+    "trader": "交易员",
+    "finance": "财务",
+    "viewer": "访客",
+}
+
+# 页面可见性（越靠左权限越高）
+PAGE_ROLES = {
+    "首页": {"viewer","finance","trader","manager","admin"},
+    "风险敞口": {"finance","trader","manager","admin"},
+    "套保计算": {"trader","manager","admin"},
+    "价差走势": {"finance","trader","manager","admin"},
+    "库存管理": {"finance","trader","manager","admin"},
+    "利润管理": {"finance","manager","admin"},
+    "期权保险": {"trader","manager","admin"},
+    "多情景分析": {"finance","trader","manager","admin"},
+    "价格行情": {"viewer","finance","trader","manager","admin"},
+    "分析报告": {"finance","trader","manager","admin"},
+    "分析历史": {"finance","trader","manager","admin"},
+    "策略管理": {"trader","manager","admin"},
+    "审计日志": {"manager","admin"},
+    "账号设置": {"viewer","finance","trader","manager","admin"},
+}
+
+# 动作权限
+ACTION_ROLES = {
+    "save_strategy": {"trader","manager","admin"},
+    "delete_strategy": {"manager","admin"},
+    "export_report": {"finance","trader","manager","admin"},
+    "delete_history": {"manager","admin"},
+    "update_settings": {"viewer","finance","trader","manager","admin"},
+    "change_role": {"admin"},
+    "view_audit": {"manager","admin"},
+}
+
+def _get_role() -> str:
+    ui = st.session_state.get("user_info") or {}
+    settings = ui.get("settings") if isinstance(ui.get("settings"), dict) else {}
+    role = (ui.get("role") or settings.get("role") or "manager").strip().lower()
+    return role if role in ROLE_LABELS else "manager"
+
+def _can(action: str) -> bool:
+    role = _get_role()
+    allowed = ACTION_ROLES.get(action, set())
+    return role in allowed if allowed else True
+
+def _require(action: str, tip: str = "权限不足，无法执行该操作。") -> bool:
+    if _can(action):
+        return True
+    st.error(f"⛔ {tip}（当前角色：{ROLE_LABELS.get(_get_role(), _get_role())}）")
+    return False
+
+class AuditLogger:
+    """轻量审计日志：
+    - 优先写入 Supabase 表 audit_logs（若可用）
+    - 同时写入 session_state（便于无后端场景演示）
+    """
+    def __init__(self, supabase_client=None):
+        self.supabase = supabase_client
+
+    def log(self, user_info: dict, action: str, detail: dict | None = None):
+        try:
+            detail = detail or {}
+            role = _get_role()
+            record = {
+                "ts": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "user_id": (user_info or {}).get("user_id"),
+                "username": (user_info or {}).get("username"),
+                "role": role,
+                "action": action,
+                "detail": detail,
+            }
+            # session_state
+            if "audit_logs" not in st.session_state:
+                st.session_state.audit_logs = []
+            st.session_state.audit_logs.insert(0, record)  # 最新在前
+
+            # supabase（尽力而为）
+            if self.supabase:
+                try:
+                    self.supabase.table("audit_logs").insert(record).execute()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+def _log(action: str, detail: dict | None = None):
+    """便捷记录：在 UI 层调用。"""
+    try:
+        analyzer = st.session_state.get("_analyzer_ref")
+        if analyzer and hasattr(analyzer, "audit"):
+            analyzer.audit.log(st.session_state.get("user_info") or {}, action, detail=detail or {})
+    except Exception:
+        pass
+
+def build_report_pdf_bytes(title: str, lines: list[str]) -> bytes | None:
+    """生成 PDF（可选依赖 reportlab）。"""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas
+        from reportlab.lib.units import mm
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+
+        # 尝试注册中文字体（如果找不到就降级英文/方框）
+        try:
+            # 常见字体路径（本地/云端不保证存在）
+            candidates = [
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+                "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+                "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            ]
+            font_path = next((p for p in candidates if os.path.exists(p)), None)
+            if font_path:
+                pdfmetrics.registerFont(TTFont("CJK", font_path))
+                font_name = "CJK"
+            else:
+                font_name = "Helvetica"
+        except Exception:
+            font_name = "Helvetica"
+
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=A4)
+        width, height = A4
+
+        c.setTitle(title)
+        c.setFont(font_name, 14)
+        c.drawString(20*mm, height-20*mm, title)
+
+        c.setFont(font_name, 10)
+        y = height - 30*mm
+        for line in lines:
+            if y < 20*mm:
+                c.showPage()
+                c.setFont(font_name, 10)
+                y = height - 20*mm
+            # 简单换行
+            s = str(line)
+            max_chars = 90
+            while len(s) > max_chars:
+                c.drawString(20*mm, y, s[:max_chars])
+                s = s[max_chars:]
+                y -= 6*mm
+                if y < 20*mm:
+                    c.showPage()
+                    c.setFont(font_name, 10)
+                    y = height - 20*mm
+            c.drawString(20*mm, y, s)
+            y -= 6*mm
+
+        c.save()
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return None
+
+def build_report_docx_bytes(title: str, lines: list[str]) -> bytes | None:
+    """生成 Word（可选依赖 python-docx）。"""
+    try:
+        from docx import Document
+        doc = Document()
+        doc.add_heading(title, level=0)
+        for line in lines:
+            doc.add_paragraph(str(line))
+        buf = io.BytesIO()
+        doc.save(buf)
+        buf.seek(0)
+        return buf.read()
+    except Exception:
+        return None
 
 SPOT_LITHIUM_PRICE_TABLE = [
     ('2025-01-01', 97000),
@@ -863,6 +1044,8 @@ def _extract_user_info_from_login_result(result, username_fallback: str = "") ->
         "username": username or username_fallback or "用户",
         "email": info.get("email"),
         "settings": settings,
+        # 角色：优先读取 settings.role；若无则默认 manager（保证可用性）
+        "role": (settings.get("role") or "manager"),
     }
 
 
@@ -879,6 +1062,7 @@ class CloudLithiumAnalyzer:
     def __init__(self):
         self.supabase = supabase if HAS_SUPABASE else None
         self.auth = CloudUserAuth()
+        self.audit = AuditLogger(self.supabase)
         # Simple in-memory cache for price data (keyed by symbol)
         self.cache_data: dict[str, pd.DataFrame] = {}
         self.cache_time: dict[str, datetime] = {}
@@ -1802,6 +1986,7 @@ def main():
     
     # 初始化分析器
     analyzer = CloudLithiumAnalyzer()
+    st.session_state["_analyzer_ref"] = analyzer
     
     # 初始化session state
     if 'authenticated' not in st.session_state:
@@ -1941,6 +2126,7 @@ def render_auth_page(analyzer):
                         st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=username)
                         st.session_state.user_id = st.session_state.user_info.get('user_id')
                         st.success("登录成功！")
+                        _log("login", {"username": username})
                         st.rerun()
                     else:
                         msg = result.get("message") if isinstance(result, dict) else str(result)
@@ -2079,7 +2265,7 @@ def render_reset_password(analyzer):
 
 def render_main_app(analyzer):
     """渲染主应用界面"""
-    pages = [
+    pages_all = [
         "首页",
         "风险敞口",
         "套保计算",
@@ -2092,11 +2278,16 @@ def render_main_app(analyzer):
         "分析报告",
         "分析历史",
         "策略管理",
+        "审计日志",
         "账号设置"
     ]
 
+    role = _get_role()
+    pages = [p for p in pages_all if role in PAGE_ROLES.get(p, {"viewer","finance","trader","manager","admin"})]
+
     with st.sidebar:
         st.markdown("### 导航")
+        st.caption(f"当前角色：{ROLE_LABELS.get(_get_role(), _get_role())}")
         if st.session_state.current_page not in pages:
             st.session_state.current_page = pages[0]
         selected = st.radio("页面", pages, index=pages.index(st.session_state.current_page))
@@ -2107,7 +2298,7 @@ def render_main_app(analyzer):
 
     user_info = st.session_state.user_info
     st.markdown(
-        f"<p style='text-align:right;color:#6e6e73;'>用户：{user_info['username']} | 云端存储 | "
+        f"<p style='text-align:right;color:#6e6e73;'>用户：{user_info['username']}（{ROLE_LABELS.get(_get_role(), _get_role())}） | 云端存储 | "
         f"{datetime.now().strftime('%Y-%m-%d')}</p>",
         unsafe_allow_html=True
     )
@@ -2139,6 +2330,8 @@ def render_main_app(analyzer):
         render_history_page(analyzer)
     elif st.session_state.current_page == "策略管理":
         render_strategy_page(analyzer)
+    elif st.session_state.current_page == "审计日志":
+        render_audit_page(analyzer)
     elif st.session_state.current_page == "账号设置":
         render_settings_page(analyzer)
 
@@ -2782,6 +2975,8 @@ def render_hedge_page(analyzer):
         strat_name = st.text_input("策略名称", value=f"LC套保_{datetime.now().strftime('%Y%m%d_%H%M')}")
         if st.button("保存当前策略", use_container_width=True):
             try:
+                if not _require("save_strategy", "只有交易员/管理者/管理员可保存策略。"):
+                    return
                 if "saved_strategies" not in st.session_state:
                     st.session_state.saved_strategies = []
                 # 获取最新期货收盘价
@@ -2801,6 +2996,7 @@ def render_hedge_page(analyzer):
                     "note": f"现货来源：内置表；期货来源：AkShare/新浪"
                 })
                 st.success("已保存。请到【策略管理】页面查看回溯。")
+                _log("save_strategy", {"name": strat_name, "hedge_ratio": float(hedge_ratio), "inventory_ton": float(inventory)})
             except Exception as e:
                 st.error(f"保存失败：{e}")
 
@@ -3809,11 +4005,20 @@ def render_report_page(analyzer):
     if not basis_data:
         price_data = analyzer.fetch_real_time_data()
         latest_futures = float(price_data["收盘价"].iloc[-1]) if not price_data.empty else 0
-        spot_price = st.number_input("现货参考价 (元/吨)", min_value=0.0, value=235000.0, step=500.0)
-        basis_value = spot_price - latest_futures
-        update_time = price_data["日期"].iloc[-1] if not price_data.empty else datetime.now()
+        # 现货参考价：优先使用内置现货表（静态），若缺失则要求用户明确输入并红字提示
+        s_price, s_date, s_ok = get_spot_price_on_or_before(pd.to_datetime(update_time))
+        if s_ok:
+            spot_price = float(s_price)
+            ref_source = "内置现货表（用户提供历史数据，静态）"
+        else:
+            st.markdown("<span style='color:red;font-weight:700'>当前为模拟数据，禁止用于对外报告（未找到内置现货价，请手动输入并确认来源）</span>", unsafe_allow_html=True)
+            spot_price = st.number_input("现货参考价 (元/吨) - 手动输入", min_value=0.0, value=0.0, step=500.0)
+            ref_source = "手动输入（需用户确认真实来源）"
         basis_data = {
             "spot_price": spot_price,
+            "ref_spot_price": spot_price,
+            "ref_spot_source": ref_source,
+            "analysis_spot_price": spot_price,
             "futures_price": latest_futures,
             "basis": basis_value,
             "update_time": update_time
@@ -3823,7 +4028,7 @@ def render_report_page(analyzer):
     scenario_results = st.session_state.get("scenario_results", [])
 
     ref_spot_price = float(basis_data.get("ref_spot_price", basis_data.get("spot_price", 0.0)))
-    ref_spot_source = str(basis_data.get("ref_spot_source", "AkShare:futures_spot_price(生意社)"))
+    ref_spot_source = str(basis_data.get("ref_spot_source", "内置现货表（用户提供历史数据）"))
     analysis_spot_price = float(basis_data.get("analysis_spot_price", basis_data.get("spot_price", 0.0)))
 
     st.markdown("### 1. 当前市场概况")
@@ -3835,7 +4040,7 @@ def render_report_page(analyzer):
             f"- 测算基准价（用于计算）：{analysis_spot_price:,.0f} 元/吨",
             f"- 期货价（主力）：{basis_data.get('futures_price', 0):,.0f} 元/吨",
             f"- 实时价差（期货主力 - 市场参考价）：{basis_data.get('basis', 0):+,.0f} 元/吨",
-            "- 数据来源：生意社（现货，AkShare futures_spot_price）/ 新浪（期货，AkShare futures_zh_daily_sina）",
+            "- 数据来源：内置现货表（静态，不实时更新）/ 新浪（期货，AkShare futures_zh_daily_sina）",
         ])
     )
 
@@ -3874,7 +4079,7 @@ def render_report_page(analyzer):
 测算基准价：{analysis_spot_price:,.0f} 元/吨
 期货价（主力）：{basis_data['futures_price']:,.0f} 元/吨
 实时价差（期货主力 - 市场参考价）：{basis_data['basis']:+,.0f} 元/吨
-数据来源：生意社（现货，AkShare futures_spot_price）/ 新浪（期货，AkShare futures_zh_daily_sina）
+数据来源：内置现货表（静态，不实时更新）/ 新浪（期货，AkShare futures_zh_daily_sina）
 
 2. 风险敞口计算结果
 """
@@ -3904,13 +4109,44 @@ def render_report_page(analyzer):
         "如需精细报告，可补充业务说明。\n"
     )
 
-    st.download_button(
-        label="下载分析报告",
-        data=report_text,
-        file_name=f"分析报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-        mime="text/plain",
-        use_container_width=True
-    )
+
+    # 商业化导出：PDF / Word（可选）
+    st.markdown("#### 导出（企业交付版）")
+    if _can("export_report"):
+        lines = [ln for ln in report_text.splitlines()]
+        pdf_bytes = build_report_pdf_bytes("熵合科技-分析报告", lines)
+        docx_bytes = build_report_docx_bytes("熵合科技-分析报告", lines)
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.download_button(
+                label="下载 TXT",
+                data=report_text,
+                file_name=f"分析报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+        with c2:
+            st.download_button(
+                label="下载 PDF",
+                data=pdf_bytes if pdf_bytes else report_text,
+                file_name=f"分析报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
+                mime="application/pdf" if pdf_bytes else "text/plain",
+                disabled=(pdf_bytes is None),
+                use_container_width=True
+            )
+        with c3:
+            st.download_button(
+                label="下载 Word",
+                data=docx_bytes if docx_bytes else report_text,
+                file_name=f"分析报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document" if docx_bytes else "text/plain",
+                disabled=(docx_bytes is None),
+                use_container_width=True
+            )
+        _log("export_report", {"formats": ["txt", "pdf" if pdf_bytes else None, "docx" if docx_bytes else None]})
+    else:
+        st.info("当前角色无权导出正式报告（PDF/Word）。如需，请联系管理员调整权限。")
 
 
 def render_history_page(analyzer):
@@ -3995,6 +4231,9 @@ def render_history_page(analyzer):
                 analysis_id = record['analysis_id']
                 if st.button("删除", key=f"delete_{analysis_id}", 
                            help="删除此条记录"):
+                    if not _require("delete_history", "只有管理者/管理员可删除历史记录。"):
+                        return
+                    _log("delete_history", {"analysis_id": analysis_id})
                     if analyzer.delete_history_record(analysis_id):
                         st.success("记录已删除")
                         st.rerun()
@@ -4101,6 +4340,9 @@ def render_strategy_page(analyzer):
         col_del, col_export = st.columns(2)
         with col_del:
             if st.button("删除该策略", type="secondary", use_container_width=True):
+                if not _require("delete_strategy", "只有管理者/管理员可删除策略。"):
+                    return
+                _log("delete_strategy", {"name": s.get("name"), "created_at": s.get("created_at")})
                 st.session_state.saved_strategies.pop(int(idx))
                 st.success("已删除。")
                 st.rerun()
@@ -4115,6 +4357,51 @@ def render_strategy_page(analyzer):
             st.download_button("导出回溯结果(JSON)", data=json.dumps(out, ensure_ascii=False, indent=2), file_name="strategy_backtest.json", mime="application/json", use_container_width=True)
     except Exception as e:
         st.error(f"回溯失败：{e}")
+
+
+
+def render_audit_page(analyzer):
+    """审计日志（轻量版）：展示关键操作，支持下载。"""
+    st.markdown("<h1>审计日志</h1>", unsafe_allow_html=True)
+
+    if not _require("view_audit", "只有管理者/管理员可查看审计日志。"):
+        return
+
+    logs = st.session_state.get("audit_logs", [])
+    if not logs:
+        st.info("暂无审计日志。提示：登录、保存/删除策略、导出报告、删除历史等操作会自动记录。")
+        return
+
+    df = pd.DataFrame(logs)
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        action_filter = st.selectbox("按动作筛选", options=["全部"] + sorted(df["action"].dropna().unique().tolist()))
+    with c2:
+        user_filter = st.selectbox("按用户筛选", options=["全部"] + sorted(df["username"].dropna().unique().tolist()))
+    with c3:
+        max_rows = st.number_input("显示条数", min_value=10, max_value=5000, value=200, step=10)
+
+    df2 = df.copy()
+    if action_filter != "全部":
+        df2 = df2[df2["action"] == action_filter]
+    if user_filter != "全部":
+        df2 = df2[df2["username"] == user_filter]
+
+    df2 = df2.head(int(max_rows))
+
+    st.dataframe(df2, use_container_width=True)
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        csv_bytes = df2.to_csv(index=False).encode("utf-8-sig")
+        st.download_button("下载审计日志 CSV", data=csv_bytes, file_name=f"audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv", mime="text/csv", use_container_width=True)
+    with col_b:
+        st.download_button("下载审计日志 JSON", data=json.dumps(logs, ensure_ascii=False, indent=2), file_name=f"audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", mime="application/json", use_container_width=True)
+
+    st.markdown("### 说明")
+    st.caption("审计日志用于企业内控：记录关键操作、操作者、时间与参数摘要。若已配置 Supabase，可将日志同步写入 audit_logs 表。")
+
 
 
 def render_settings_page(analyzer):
@@ -4135,6 +4422,7 @@ def render_settings_page(analyzer):
                 st.markdown(f"**用户名**：{user_info['username']}")
                 st.markdown(f"**邮箱**：{user_info['email']}")
                 st.markdown(f"**用户ID**：`{user_info['user_id']}`")
+                st.markdown(f"**角色**：{ROLE_LABELS.get(_get_role(), _get_role())}")
             
             with col_info2:
                 if 'settings' in user_info and user_info['settings']:
@@ -4144,6 +4432,35 @@ def render_settings_page(analyzer):
                     st.markdown(f"**注册时间**：{settings.get('created_at', '未知')[:10]}")
                 else:
                     st.markdown("**账户状态**：设置未加载")
+
+                # 角色管理（最小实现：管理员可为当前账号设置角色）
+                if _can("change_role"):
+                    st.markdown("#### 角色管理")
+                    roles_list = list(ROLE_LABELS.keys())
+                    new_role = st.selectbox(
+                        "设置当前账号角色",
+                        options=roles_list,
+                        format_func=lambda r: f"{ROLE_LABELS.get(r, r)} ({r})",
+                        index=roles_list.index(_get_role()) if _get_role() in roles_list else 1
+                    )
+                    if st.button("保存角色", key="save_role", use_container_width=True):
+                        settings = user_info.get("settings") if isinstance(user_info.get("settings"), dict) else {}
+                        settings["role"] = new_role
+                        ok = analyzer.auth.update_user_settings(user_info["user_id"], settings)
+                        if ok:
+                            st.session_state.user_info["settings"] = settings
+                            st.session_state.user_info["role"] = new_role
+                            _log("change_role", {"new_role": new_role})
+                            st.success("角色已更新")
+                            st.rerun()
+                        else:
+                            # 无后端时也允许在本次会话生效（演示用）
+                            st.session_state.user_info["settings"] = settings
+                            st.session_state.user_info["role"] = new_role
+                            _log("change_role", {"new_role": new_role, "note": "no_backend"})
+                            st.warning("后端未配置：角色仅在本次会话生效（演示用）")
+                            st.rerun()
+
         
         # 账户操作
         st.markdown("### 账户操作")
@@ -4277,6 +4594,7 @@ def render_settings_page(analyzer):
                 if analyzer.auth.update_user_settings(user_info['user_id'], new_settings):
                     st.success("偏好设置已保存")
                     st.session_state.user_info['settings'] = new_settings
+                    _log("update_settings", {"keys": list(new_settings.keys())})
                 else:
                     st.error("保存设置失败")
         else:
@@ -4339,6 +4657,7 @@ def render_settings_page(analyzer):
     with col_logout2:
         if st.button("退出登录", type="primary", use_container_width=True):
             st.session_state.authenticated = False
+            _log("logout", {})
             st.session_state.user_info = None
             st.success("已退出登录")
             st.rerun()
