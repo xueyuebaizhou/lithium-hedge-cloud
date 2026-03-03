@@ -1,4 +1,4 @@
-# app_cloud.py - 完整云端版本（v27：现货参考价自动回溯最近有效日）
+# app_cloud.py - 完整云端版本（v30：准商业级升级：基差分解/历史VaR-CVaR/套保比例优化/策略回溯/库存风险热力图；现货内置表）
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -450,6 +450,54 @@ SPOT_LITHIUM_PRICE_TABLE = [
     ('2026-03-02', 172500),
     ('2026-03-03', 173000),
 ]
+
+# === 内置现货价格表（静态，不实时更新）辅助 ===
+def _build_spot_df():
+    try:
+        df = pd.DataFrame(SPOT_LITHIUM_PRICE_TABLE, columns=["date", "spot_price"])
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+        df["spot_price"] = pd.to_numeric(df["spot_price"], errors="coerce")
+        df = df.dropna(subset=["spot_price"])
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["date", "spot_price"])
+
+_SPOT_DF = _build_spot_df()
+
+def get_spot_price_on_or_before(target_date: datetime):
+    """取现货表中 date <= target_date 的最近一条价格。返回 (price, used_date, ok)"""
+    try:
+        if _SPOT_DF is None or _SPOT_DF.empty:
+            return None, None, False
+        d = pd.to_datetime(target_date).normalize()
+        sub = _SPOT_DF[_SPOT_DF["date"] <= d]
+        if sub.empty:
+            return None, None, False
+        row = sub.iloc[-1]
+        return float(row["spot_price"]), row["date"].to_pydatetime(), True
+    except Exception:
+        return None, None, False
+
+def compute_historical_var_cvar(pnl_series: pd.Series, alpha: float = 0.05):
+    """历史法 VaR / CVaR（不生成任何模拟价格，完全基于真实历史分布）。"""
+    s = pd.to_numeric(pnl_series, errors="coerce").dropna()
+    if s.empty:
+        return None, None
+    var = float(np.quantile(s, alpha))
+    tail = s[s <= var]
+    cvar = float(tail.mean()) if not tail.empty else var
+    return var, cvar
+
+def align_spot_futures(spot_df: pd.DataFrame, fut_df: pd.DataFrame):
+    """对齐现货与期货到同一日期（inner join）。"""
+    a = spot_df.copy()
+    b = fut_df.copy()
+    a["date"] = pd.to_datetime(a["date"]).dt.normalize()
+    b["date"] = pd.to_datetime(b["date"]).dt.normalize()
+    merged = pd.merge(a, b, on="date", how="inner")
+    merged = merged.sort_values("date").reset_index(drop=True)
+    return merged
 
 def _fmt_dt(x):
     """Format datetime/date/str safely for UI."""
@@ -1083,7 +1131,7 @@ class CloudLithiumAnalyzer:
         """Fetch spot reference price from an embedded (static) table.
 
         Notes:
-        - The user provided an Excel table '碳酸锂现货价格.xlsx'. For deployment stability (no external files),
+        - The user provided an Excel table '（已内置现货表）'. For deployment stability (no external files),
           we embed that table into this program as SPOT_LITHIUM_PRICE_TABLE.
         - No realtime update is performed.
         - If `date` is provided, we use the latest spot price whose date <= `date`.
@@ -2043,6 +2091,7 @@ def render_main_app(analyzer):
         "价格行情",
         "分析报告",
         "分析历史",
+        "策略管理",
         "账号设置"
     ]
 
@@ -2088,6 +2137,8 @@ def render_main_app(analyzer):
         render_report_page(analyzer)
     elif st.session_state.current_page == "分析历史":
         render_history_page(analyzer)
+    elif st.session_state.current_page == "策略管理":
+        render_strategy_page(analyzer)
     elif st.session_state.current_page == "账号设置":
         render_settings_page(analyzer)
 
@@ -2316,6 +2367,12 @@ def render_hedge_page(analyzer):
         
         # 套保比例滑块
         default_ratio = user_settings.get('default_hedge_ratio', 0.8)
+        _ov = st.session_state.get('hedge_ratio_override')
+        if _ov is not None:
+            try:
+                default_ratio = float(_ov)
+            except Exception:
+                pass
 
         hedge_ratio_percent = st.slider(
             "套保比例 (%)",
@@ -2623,6 +2680,130 @@ def render_hedge_page(analyzer):
         """)
 
 
+    st.markdown("---")
+    st.markdown("## 套保比例优化（历史法：不生成任何模拟价格）")
+    with st.expander("打开：基于真实历史分布自动求解最优套保比例", expanded=False):
+        st.caption("说明：使用真实历史“现货（内置表）+ 期货收盘价（AkShare/新浪）”对齐后的变动来做风险度量（历史 VaR / CVaR）。不做随机模拟、不生成任何虚构价格。")
+        opt_days = st.slider("用于优化的历史窗口（交易日）", 60, 400, 180, 10)
+        horizon = st.selectbox("风险度量周期", ["1日", "5日", "20日"], index=0)
+        alpha = st.select_slider("置信水平（尾部概率）", options=[0.10, 0.05, 0.01], value=0.05, help="0.05 表示 95% 置信水平下的尾部风险")
+        exposure_type = st.selectbox(
+            "业务场景",
+            ["库存（担心价格下跌）", "未来采购（担心价格上涨）"],
+            index=0,
+            help="库存：持有现货，担心价格下跌；未来采购：未来要买入现货，担心价格上涨"
+        )
+        objective = st.selectbox("优化目标", ["最小CVaR（推荐）", "最小VaR", "最小波动率"], index=0)
+
+        if st.button("计算最优套保比例", use_container_width=True):
+            try:
+                # 期货历史
+                fut = analyzer.fetch_real_time_data(symbol="LC0", days=int(opt_days)+30, force_refresh=False)
+                fut = fut.rename(columns={"日期": "date", "收盘价": "fut_close"})
+                fut = fut[["date", "fut_close"]].dropna()
+
+                # 现货历史（内置）
+                spot = _SPOT_DF.copy()
+                merged = align_spot_futures(spot, fut)
+                if merged.empty or merged.shape[0] < 30:
+                    st.error("现货/期货可对齐的历史数据不足，无法优化（请检查内置现货表日期范围与期货数据是否重叠）。")
+                else:
+                    # 仅取最近 opt_days
+                    merged = merged.tail(int(opt_days)).copy()
+                    w = {"1日": 1, "5日": 5, "20日": 20}[horizon]
+
+                    merged["d_spot"] = merged["spot_price"].diff(w)
+                    merged["d_fut"] = merged["fut_close"].diff(w)
+                    merged = merged.dropna(subset=["d_spot", "d_fut"])
+
+                    Q = float(inventory)  # 吨
+                    # 业务方向：库存（担心跌）=> 现货P&L=Q*d_spot；对冲用“卖出期货”=> 期货P&L = -h*Q*d_fut
+                    # 未来采购（担心涨）=> 成本风险= -Q*d_spot（价格涨则亏）；对冲用“买入期货”=> +h*Q*d_fut
+                    if "库存" in exposure_type:
+                        spot_pnl = Q * merged["d_spot"]
+                        fut_pnl_sign = -1.0
+                    else:
+                        spot_pnl = -Q * merged["d_spot"]
+                        fut_pnl_sign = 1.0
+
+                    hs = np.linspace(0, 1, 101)
+                    rows = []
+                    for h in hs:
+                        net_pnl = spot_pnl + fut_pnl_sign * h * Q * merged["d_fut"]
+                        if objective == "最小波动率":
+                            score = float(np.std(net_pnl))
+                        else:
+                            var, cvar = compute_historical_var_cvar(net_pnl, alpha=alpha)
+                            if var is None:
+                                continue
+                            score = float(cvar) if objective == "最小CVaR（推荐）" else float(var)
+                        rows.append((h, score))
+
+                    if not rows:
+                        st.error("优化失败：风险指标无法计算。")
+                    else:
+                        # 对于 VaR/CVaR（这里是 PnL 的尾部均值/分位数，越大越好），所以我们选择 score 最大（最不亏）
+                        df_opt = pd.DataFrame(rows, columns=["hedge_ratio", "score"])
+                        if objective == "最小波动率":
+                            best = df_opt.loc[df_opt["score"].idxmin()]
+                        else:
+                            best = df_opt.loc[df_opt["score"].idxmax()]
+
+                        best_h = float(best["hedge_ratio"])
+                        st.success(f"建议套保比例：**{best_h*100:.0f}%**（{objective}，周期{horizon}，alpha={alpha}）")
+
+                        # 展示对比
+                        base_net = spot_pnl  # h=0
+                        hedged_net = spot_pnl + fut_pnl_sign * best_h * Q * merged["d_fut"]
+                        base_var, base_cvar = compute_historical_var_cvar(base_net, alpha=alpha)
+                        hed_var, hed_cvar = compute_historical_var_cvar(hedged_net, alpha=alpha)
+
+                        c1, c2, c3, c4 = st.columns(4)
+                        c1.metric("未套保 VaR", f"{base_var:,.0f}" if base_var is not None else "—")
+                        c2.metric("未套保 CVaR", f"{base_cvar:,.0f}" if base_cvar is not None else "—")
+                        c3.metric("套保后 VaR", f"{hed_var:,.0f}" if hed_var is not None else "—")
+                        c4.metric("套保后 CVaR", f"{hed_cvar:,.0f}" if hed_cvar is not None else "—")
+
+                        st.line_chart(pd.DataFrame({
+                            "未套保": base_net.reset_index(drop=True),
+                            "套保后": hedged_net.reset_index(drop=True),
+                        }))
+
+                        # 一键写回页面 slider 的参考值（不强制）
+                        if st.button("将建议比例写入上方套保比例", key="apply_best_h"):
+                            st.session_state.hedge_ratio_override = best_h
+                            st.success("已写入建议比例（下次计算将使用该比例）")
+            except Exception as e:
+                st.error(f"优化计算失败：{e}")
+
+    st.markdown("## 策略保存与回溯（轻量版）")
+    with st.expander("打开：将当前方案保存到“策略管理”", expanded=False):
+        st.caption("说明：保存的是参数与当日（或最近交易日）期货收盘价快照，用于后续回溯。")
+        strat_name = st.text_input("策略名称", value=f"LC套保_{datetime.now().strftime('%Y%m%d_%H%M')}")
+        if st.button("保存当前策略", use_container_width=True):
+            try:
+                if "saved_strategies" not in st.session_state:
+                    st.session_state.saved_strategies = []
+                # 获取最新期货收盘价
+                fdf = analyzer.fetch_real_time_data(symbol="LC0", days=10, force_refresh=False)
+                last_close = float(fdf["收盘价"].dropna().iloc[-1]) if (fdf is not None and not fdf.empty and "收盘价" in fdf.columns) else None
+                # 现货（内置表，取<=今日最近）
+                s_price, s_date, s_ok = get_spot_price_on_or_before(datetime.now())
+                st.session_state.saved_strategies.append({
+                    "name": strat_name,
+                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "inventory_ton": float(inventory),
+                    "cost_price": float(cost_price),
+                    "hedge_ratio": float(hedge_ratio),
+                    "fut_close_at_create": last_close,
+                    "spot_at_create": s_price if s_ok else None,
+                    "spot_date": s_date.strftime("%Y-%m-%d") if s_ok and s_date else None,
+                    "note": f"现货来源：内置表；期货来源：AkShare/新浪"
+                })
+                st.success("已保存。请到【策略管理】页面查看回溯。")
+            except Exception as e:
+                st.error(f"保存失败：{e}")
+
 def render_price_page(analyzer):
     """渲染价格行情页面"""
     st.markdown("<h1>碳酸锂实时价格行情</h1>", unsafe_allow_html=True)
@@ -2886,13 +3067,28 @@ def render_basis_page(analyzer):
 
     说明：
     - 期货价格：AkShare `futures_zh_daily_sina`（新浪财经日频）
-    - 现货参考价：本地静态表格 `碳酸锂现货价格.xlsx`（不实时更新）
+    - 现货参考价：内置静态价格表（由你提供的 Excel 融合进程序；不实时更新）
     - 价差（展示）：期货主力 - 测算基准价（默认取表格现货价，可手动覆盖）
     """
     st.markdown("<h1>期货-市场参考价差走势</h1>", unsafe_allow_html=True)
 
     # 免责声明（普通字体，不标红）
     st.markdown("当前所用价格为行业市场参考价（统计口径），非现货成交价。")
+    st.markdown("---")
+    st.markdown("## 基差分解（用于解释“为什么会有价差”）")
+    with st.expander("打开：把价差拆成可解释的成本项 + 残差", expanded=False):
+        st.caption("说明：现货市场没有统一“收盘价”，这里的现货为统计口径参考价。分解项用于管理层理解，不代表精确会计成本。")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            storage_cost = st.number_input("仓储/物流成本（元/吨·月）", min_value=0.0, value=500.0, step=50.0)
+        with c2:
+            funding_rate = st.number_input("资金占用年化利率（%）", min_value=0.0, value=6.0, step=0.5)
+        with c3:
+            quality_diff = st.number_input("品质/地区差异（元/吨，可正可负）", value=0.0, step=100.0)
+
+        tenor_days = st.slider("假设期限（天）", 1, 90, 30, 1)
+        st.caption("期限用于把资金成本与仓储成本折算到同一时间尺度。")
+
 
     col_left, col_right = st.columns([2, 1])
 
@@ -2912,7 +3108,7 @@ def render_basis_page(analyzer):
     # 市场参考价（静态表格）：本地 Excel（不实时更新）
     # ==========================
     st.markdown("### 市场参考价（现货静态表格）")
-    st.caption("当前价差页的现货参考价使用本地表格“碳酸锂现货价格.xlsx”（静态，不考虑实时更新）。")
+    st.caption("当前价差页的现货参考价使用本地表格“（已内置现货表）”（静态，不考虑实时更新）。")
 
     with st.container():
         c1, c2 = st.columns([1, 2])
@@ -3014,6 +3210,32 @@ def render_basis_page(analyzer):
 
     # 价差 = 期货主力 - 测算基准价
     display_data["价差"] = display_data["收盘价"] - analysis_ref_price
+
+    # 基差（现货参考价 - 期货）与分解
+    basis_spot_minus_fut = analysis_ref_price - display_data["收盘价"]
+    theoretical_basis = (storage_cost * (tenor_days / 30.0)) + (analysis_ref_price * (funding_rate / 100.0) * (tenor_days / 365.0)) + quality_diff
+    residual_basis = basis_spot_minus_fut - theoretical_basis
+
+    # 展示分解（最新一天）
+    try:
+        b_latest = float(basis_spot_minus_fut.iloc[-1])
+        r_latest = float(residual_basis.iloc[-1])
+        t_latest = float(theoretical_basis)
+        c1, c2, c3 = st.columns(3)
+        c1.metric("最新基差（现货-期货）", f"{b_latest:,.0f} 元/吨")
+        c2.metric("可解释成本项合计", f"{t_latest:,.0f} 元/吨")
+        c3.metric("残差（情绪/供需/口径差）", f"{r_latest:,.0f} 元/吨")
+    except Exception:
+        pass
+
+    with st.expander("查看基差分解曲线", expanded=False):
+        df_tmp = pd.DataFrame({
+            "日期": pd.to_datetime(display_data["日期"]),
+            "基差(现货-期货)": basis_spot_minus_fut.values,
+            "可解释成本项": np.full(len(display_data), float(theoretical_basis)),
+            "残差": residual_basis.values,
+        })
+        st.line_chart(df_tmp.set_index("日期"))
 
     latest_futures = float(display_data["收盘价"].iloc[-1])
     latest_diff = latest_futures - analysis_ref_price
@@ -3158,6 +3380,44 @@ def render_inventory_page(analyzer):
                 csv = df.to_csv(index=False).encode("utf-8-sig")
                 st.download_button("下载 CSV", data=csv, file_name="inventory_ledger.csv", mime="text/csv")
 
+
+    st.markdown("---")
+    st.markdown("## 库存风险热力图（历史VaR/CVaR，非模拟）")
+    with st.expander("打开：查看不同周期下库存价值的尾部风险", expanded=False):
+        st.caption("说明：使用 LC 主力真实历史收盘价变动计算库存价值变化分布，并给出 VaR/CVaR（历史法）。")
+        qty = st.number_input("库存数量（吨）", min_value=0.0, value=100.0, step=1.0, key="inv_risk_qty")
+        lookback = st.slider("历史窗口（交易日）", 60, 500, 250, 10, key="inv_risk_lb")
+        horizons = [1, 5, 20]
+        alphas = [0.10, 0.05, 0.01]
+        try:
+            fdf = analyzer.fetch_real_time_data(symbol="LC0", days=int(lookback)+30, force_refresh=False)
+            fdf = fdf.rename(columns={"日期":"date","收盘价":"close"})[["date","close"]].dropna()
+            fdf["date"] = pd.to_datetime(fdf["date"]).dt.normalize()
+            fdf = fdf.sort_values("date").tail(int(lookback)).reset_index(drop=True)
+
+            # 计算不同周期的价值变化（用期货收盘价做锚点；若你未来接入企业合同价，可替换为合同价序列）
+            mat = []
+            idx_names = []
+            for h in horizons:
+                dP = fdf["close"].diff(h).dropna()
+                pnl = float(qty) * dP
+                row = []
+                for a in alphas:
+                    var, cvar = compute_historical_var_cvar(pnl, alpha=a)
+                    row.append(cvar if cvar is not None else np.nan)  # 用 CVaR 更保守
+                mat.append(row)
+                idx_names.append(f"{h}日")
+            heat = pd.DataFrame(mat, index=idx_names, columns=[f"alpha={a}" for a in alphas])
+            st.dataframe(heat.style.format("{:,.0f}"), use_container_width=True)
+            st.caption("表格数值为 CVaR（单位：元），越小（越负）代表尾部风险越大。")
+
+            # 简单可视化：选择一个周期展示PnL分布
+            h_pick = st.selectbox("查看PnL分布（周期）", horizons, index=0, key="inv_risk_hpick")
+            dP2 = fdf["close"].diff(int(h_pick)).dropna()
+            pnl2 = float(qty) * dP2
+            st.line_chart(pd.Series(pnl2.reset_index(drop=True), name="库存价值变化(元)"))
+        except Exception as e:
+            st.error(f"库存风险计算失败：{e}")
 
 def render_profit_page(analyzer):
     """利润管理（MVP）"""
@@ -3504,6 +3764,43 @@ def render_scenario_page(analyzer):
     st.session_state.scenario_results = rows
 
 
+    st.markdown("---")
+    st.markdown("## 历史极端情景（自动提取，非模拟）")
+    with st.expander("打开：从真实历史数据中抽取最极端的涨跌日作为压力测试", expanded=False):
+        lookback = st.slider("回看窗口（交易日）", 60, 500, 250, 10, key="hist_scn_lb")
+        topn = st.slider("展示极端情景数量", 3, 20, 10, 1, key="hist_scn_topn")
+        try:
+            fdf = analyzer.fetch_real_time_data(symbol="LC0", days=int(lookback)+30, force_refresh=False)
+            fdf = fdf.rename(columns={"日期":"date","收盘价":"close"})[["date","close"]].dropna()
+            fdf["date"] = pd.to_datetime(fdf["date"]).dt.normalize()
+            fdf = fdf.sort_values("date").tail(int(lookback)).reset_index(drop=True)
+            fdf["ret_1d"] = fdf["close"].pct_change()
+            fdf = fdf.dropna(subset=["ret_1d"])
+            worst = fdf.nsmallest(int(topn), "ret_1d")[["date","ret_1d","close"]]
+            best = fdf.nlargest(int(topn), "ret_1d")[["date","ret_1d","close"]]
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("### 最差跌幅日")
+                st.dataframe(worst.assign(ret_1d=worst["ret_1d"]*100).rename(columns={"ret_1d":"跌幅(%)","close":"收盘价"}), use_container_width=True)
+            with c2:
+                st.markdown("### 最强涨幅日")
+                st.dataframe(best.assign(ret_1d=best["ret_1d"]*100).rename(columns={"ret_1d":"涨幅(%)","close":"收盘价"}), use_container_width=True)
+
+            # 将极端日映射到库存盈亏（以当前参数）
+            Q = float(inventory)
+            # 用百分比冲击近似作用于“测算基准价/现货参考价”（如果你未来用企业合同价，可替换）
+            base_price = float(cost_price) if float(cost_price) > 0 else float(fdf["close"].iloc[-1])
+            worst_pnl = -Q * base_price * worst["ret_1d"]  # 价格下跌，库存亏损为负（这里取负号便于解释）
+            best_pnl  = -Q * base_price * best["ret_1d"]
+            st.markdown("### 以当前库存/成本价估算的压力盈亏（仅用于压力测试解释）")
+            df_pnl = pd.concat([
+                worst.assign(压力盈亏_元=worst_pnl.values).rename(columns={"ret_1d":"日收益率"}),
+                best.assign(压力盈亏_元=best_pnl.values).rename(columns={"ret_1d":"日收益率"})
+            ], ignore_index=True)
+            st.dataframe(df_pnl, use_container_width=True)
+        except Exception as e:
+            st.error(f"历史情景提取失败：{e}")
+
 def render_report_page(analyzer):
     """渲染分析报告页面"""
     st.markdown("<h1>分析报告</h1>", unsafe_allow_html=True)
@@ -3751,6 +4048,73 @@ def render_history_page(analyzer):
     with col_batch3:
         if st.button("刷新列表", use_container_width=True):
             st.rerun()
+
+
+
+def render_strategy_page(analyzer):
+    """策略管理与回溯（轻量版，适合竞赛演示与早期试点）"""
+    st.markdown("<h1>策略管理与回溯</h1>", unsafe_allow_html=True)
+    st.caption("这里记录你在【套保计算】页面保存的方案，并基于真实期货收盘价做回溯（不做模拟）。")
+
+    strategies = st.session_state.get("saved_strategies", [])
+    if not strategies:
+        st.info("暂无已保存策略。请先到【套保计算】->“策略保存与回溯”保存一条策略。")
+        return
+
+    df = pd.DataFrame(strategies)
+    st.dataframe(df, use_container_width=True)
+
+    st.markdown("## 回溯计算")
+    idx = st.selectbox("选择一条策略进行回溯", list(range(len(strategies))), format_func=lambda i: f"{strategies[i].get('name','未命名')}（{strategies[i].get('created_at','')}）")
+    s = strategies[int(idx)]
+
+    # 回溯参数
+    days = st.slider("回溯窗口（交易日）", 20, 400, 120, 10)
+    alpha = st.select_slider("尾部概率 alpha", options=[0.10, 0.05, 0.01], value=0.05)
+
+    try:
+        fdf = analyzer.fetch_real_time_data(symbol="LC0", days=int(days)+30, force_refresh=False)
+        fdf = fdf.rename(columns={"日期":"date","收盘价":"close"})[["date","close"]].dropna()
+        fdf["date"] = pd.to_datetime(fdf["date"]).dt.normalize()
+        fdf = fdf.sort_values("date").tail(int(days)).reset_index(drop=True)
+
+        Q = float(s.get("inventory_ton", 0.0))
+        h = float(s.get("hedge_ratio", 0.0))
+        # 默认按“库存（担心下跌）”理解：现货P&L ~ Q*dP；期货卖出套保：-h*Q*dP_fut
+        dP = fdf["close"].diff().dropna()
+        spot_pnl = Q * dP
+        fut_pnl = -h * Q * dP
+        net = (spot_pnl + fut_pnl).reset_index(drop=True)
+
+        var, cvar = compute_historical_var_cvar(net, alpha=alpha)
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("套保比例", f"{h*100:.0f}%")
+        c2.metric("历史VaR (PnL)", f"{var:,.0f}" if var is not None else "—")
+        c3.metric("历史CVaR (PnL)", f"{cvar:,.0f}" if cvar is not None else "—")
+
+        st.line_chart(pd.Series(net, name="净PnL(元)"))
+
+        st.markdown("### 备注")
+        st.write(s.get("note", ""))
+
+        col_del, col_export = st.columns(2)
+        with col_del:
+            if st.button("删除该策略", type="secondary", use_container_width=True):
+                st.session_state.saved_strategies.pop(int(idx))
+                st.success("已删除。")
+                st.rerun()
+        with col_export:
+            out = {
+                "strategy": s,
+                "backtest_window_days": int(days),
+                "alpha": float(alpha),
+                "var_pnl": var,
+                "cvar_pnl": cvar,
+            }
+            st.download_button("导出回溯结果(JSON)", data=json.dumps(out, ensure_ascii=False, indent=2), file_name="strategy_backtest.json", mime="application/json", use_container_width=True)
+    except Exception as e:
+        st.error(f"回溯失败：{e}")
 
 
 def render_settings_page(analyzer):
