@@ -67,10 +67,9 @@ ACTION_ROLES = {
 }
 
 def _get_role() -> str:
-    ui = st.session_state.get("user_info") or {}
-    settings = ui.get("settings") if isinstance(ui.get("settings"), dict) else {}
-    role = (ui.get("role") or settings.get("role") or "manager").strip().lower()
-    return role if role in ROLE_LABELS else "manager"
+    """v31.1: role/identity separation removed. All users share the same permissions."""
+    return "unified"
+
 
 def _can(action: str) -> bool:
     role = _get_role()
@@ -80,7 +79,7 @@ def _can(action: str) -> bool:
 def _require(action: str, tip: str = "权限不足，无法执行该操作。") -> bool:
     if _can(action):
         return True
-    st.error(f"⛔ {tip}（当前角色：{ROLE_LABELS.get(_get_role(), _get_role())}）")
+    st.error(f"⛔ {tip}")
     return False
 
 class AuditLogger:
@@ -2282,12 +2281,10 @@ def render_main_app(analyzer):
         "账号设置"
     ]
 
-    role = _get_role()
-    pages = [p for p in pages_all if role in PAGE_ROLES.get(p, {"viewer","finance","trader","manager","admin"})]
+    pages = pages_all
 
     with st.sidebar:
         st.markdown("### 导航")
-        st.caption(f"当前角色：{ROLE_LABELS.get(_get_role(), _get_role())}")
         if st.session_state.current_page not in pages:
             st.session_state.current_page = pages[0]
         selected = st.radio("页面", pages, index=pages.index(st.session_state.current_page))
@@ -2298,7 +2295,7 @@ def render_main_app(analyzer):
 
     user_info = st.session_state.user_info
     st.markdown(
-        f"<p style='text-align:right;color:#6e6e73;'>用户：{user_info['username']}（{ROLE_LABELS.get(_get_role(), _get_role())}） | 云端存储 | "
+        f"<p style='text-align:right;color:#6e6e73;'>用户：{user_info['username']} | 云端存储 | "
         f"{datetime.now().strftime('%Y-%m-%d')}</p>",
         unsafe_allow_html=True
     )
@@ -4146,7 +4143,7 @@ def render_report_page(analyzer):
             )
         _log("export_report", {"formats": ["txt", "pdf" if pdf_bytes else None, "docx" if docx_bytes else None]})
     else:
-        st.info("当前角色无权导出正式报告（PDF/Word）。如需，请联系管理员调整权限。")
+        st.info("当前环境未开启正式报告导出权限。")
 
 
 def render_history_page(analyzer):
@@ -4422,7 +4419,7 @@ def render_settings_page(analyzer):
                 st.markdown(f"**用户名**：{user_info['username']}")
                 st.markdown(f"**邮箱**：{user_info['email']}")
                 st.markdown(f"**用户ID**：`{user_info['user_id']}`")
-                st.markdown(f"**角色**：{ROLE_LABELS.get(_get_role(), _get_role())}")
+                st.markdown("**权限**：统一（不区分角色）")
             
             with col_info2:
                 if 'settings' in user_info and user_info['settings']:
@@ -4432,34 +4429,7 @@ def render_settings_page(analyzer):
                     st.markdown(f"**注册时间**：{settings.get('created_at', '未知')[:10]}")
                 else:
                     st.markdown("**账户状态**：设置未加载")
-
-                # 角色管理（最小实现：管理员可为当前账号设置角色）
-                if _can("change_role"):
-                    st.markdown("#### 角色管理")
-                    roles_list = list(ROLE_LABELS.keys())
-                    new_role = st.selectbox(
-                        "设置当前账号角色",
-                        options=roles_list,
-                        format_func=lambda r: f"{ROLE_LABELS.get(r, r)} ({r})",
-                        index=roles_list.index(_get_role()) if _get_role() in roles_list else 1
-                    )
-                    if st.button("保存角色", key="save_role", use_container_width=True):
-                        settings = user_info.get("settings") if isinstance(user_info.get("settings"), dict) else {}
-                        settings["role"] = new_role
-                        ok = analyzer.auth.update_user_settings(user_info["user_id"], settings)
-                        if ok:
-                            st.session_state.user_info["settings"] = settings
-                            st.session_state.user_info["role"] = new_role
-                            _log("change_role", {"new_role": new_role})
-                            st.success("角色已更新")
-                            st.rerun()
-                        else:
-                            # 无后端时也允许在本次会话生效（演示用）
-                            st.session_state.user_info["settings"] = settings
-                            st.session_state.user_info["role"] = new_role
-                            _log("change_role", {"new_role": new_role, "note": "no_backend"})
-                            st.warning("后端未配置：角色仅在本次会话生效（演示用）")
-                            st.rerun()
+                # 角色/身份区分功能已移除：所有账号拥有相同权限。
 
         
         # 账户操作
