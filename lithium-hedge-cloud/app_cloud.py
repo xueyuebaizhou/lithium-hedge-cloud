@@ -3230,9 +3230,6 @@ def render_basis_page(analyzer):
     c1, c2 = st.columns([1, 2])
     with c1:
         spot_date = st.date_input("现货参考价日期", value=datetime.now().date())
-    with c2:
-        
-
     spot_date_str = spot_date.strftime("%Y%m%d")
     spot_info = analyzer.fetch_spot_price_from_excel(date=spot_date_str)
     ref_price = spot_info.get("price")
