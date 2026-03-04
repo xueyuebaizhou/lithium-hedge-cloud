@@ -3518,7 +3518,7 @@ def render_inventory_page(analyzer):
 
 
     st.markdown("---")
-    st.markdown("## 库存风险热力图（历史VaR/CVaR，非模拟）")
+    st.markdown("## 库存风险热力图")
     with st.expander("打开：查看不同周期下库存价值的尾部风险", expanded=False):
         st.caption("说明：使用 LC 主力真实历史收盘价变动计算库存价值变化分布，并给出 VaR/CVaR（历史法）。")
         qty = st.number_input("库存数量（吨）", min_value=0.0, value=100.0, step=1.0, key="inv_risk_qty")
@@ -3667,7 +3667,7 @@ def render_profit_page(analyzer):
 
 def render_option_page(analyzer):
     """渲染期权保险计算页面"""
-    st.markdown("<h1>价格保险（期权）计算</h1>", unsafe_allow_html=True)
+    st.markdown("<h1>期权计算</h1>", unsafe_allow_html=True)
 
     col_left, col_right = st.columns([1, 2])
 
