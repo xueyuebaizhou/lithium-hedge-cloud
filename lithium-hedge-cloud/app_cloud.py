@@ -2412,31 +2412,7 @@ def render_home_page(analyzer):
         """)
     
     # 技术架构
-    st.markdown("### 技术架构")
     
-    architecture = """
-    ```
-    前端界面 (Streamlit)
-         │
-         ↓ HTTPS
-    Python后端应用
-         │
-         ↓ API调用
-    Supabase云端数据库 (PostgreSQL)
-         │
-         ↓ API调用
-    第三方数据源 (akshare)
-    ```
-    
-    **技术栈**：
-    - 前端：Streamlit + Matplotlib
-    - 后端：Python + Supabase SDK
-    - 数据库：PostgreSQL (Supabase)
-    - 数据源：akshare金融数据
-    - 部署：Streamlit Community Cloud
-    """
-    
-    st.code(architecture, language=None)
     
     # 侧边栏显示实时价格
     with st.sidebar:
