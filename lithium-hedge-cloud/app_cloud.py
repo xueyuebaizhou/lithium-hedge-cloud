@@ -3226,12 +3226,12 @@ def render_basis_page(analyzer):
     # ==========================
     # 市场参考价（现货）：定期更新表格
     # ==========================
-    st.markdown("### 市场参考价（现货）")
+    st.caption("市场参考价（现货） 默认取不晚于该日期的最近一条现货参考价。")
     c1, c2 = st.columns([1, 2])
     with c1:
         spot_date = st.date_input("现货参考价日期", value=datetime.now().date())
     with c2:
-        st.caption("默认取不晚于该日期的最近一条现货参考价。")
+        
 
     spot_date_str = spot_date.strftime("%Y%m%d")
     spot_info = analyzer.fetch_spot_price_from_excel(date=spot_date_str)
@@ -3246,14 +3246,11 @@ def render_basis_page(analyzer):
         st.markdown("### 现货参考价")
         if display_ref_price is None:
             st.markdown("**暂无**")
-            if ref_detail:
-                st.caption(f"{ref_source}；{ref_detail}")
+            
         else:
             st.metric("现货参考价", f"{display_ref_price:,.0f} 元/吨")
-            if ref_detail:
-                st.caption(f"{ref_source}；{ref_detail}")
-            else:
-                st.caption(f"来源：{ref_source}")
+            
+            
 
         # 仅在需要时提示“企业真实价”声明（保持长期约束逻辑）
         user_confirm_real = st.checkbox(
