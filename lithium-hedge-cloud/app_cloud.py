@@ -3199,15 +3199,7 @@ def _series_last_bool(df: 'pd.DataFrame', col: str, default: bool = False) -> bo
         return default
 
 def render_basis_page(analyzer):
-    """渲染多基准价差页面。
-
-    支持三种基准口径：
-    1. 市场现货价
-    2. 用户自定义
-    3. 真实采购成本
-
-    主界面只展示当前选中的口径，并在下方提供三口径对比表，避免信息混乱。
-    """
+    """渲染多基准价差页面。"""
     st.markdown("<h1>期货-市场参考价差走势</h1>", unsafe_allow_html=True)
     st.caption("支持按市场现货价、用户自定义、真实采购成本三种口径查看价差。")
 
@@ -3375,6 +3367,40 @@ def render_basis_page(analyzer):
         })
     st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, hide_index=True)
 
+    st.markdown("### 市场现货价口径明细表")
+    st.markdown(
+        "**说明：下表为基于系统内置现货价格表计算的逐日价差明细，用于展示真实市场参考口径下的历史数据。用户自定义基准与真实采购成本属于测算口径，不在本表中展示为市场原始数据。**"
+    )
+    with st.expander("详细数据表格", expanded=False):
+        try:
+            fut_detail = display_data[["日期", "收盘价"]].copy()
+            fut_detail["日期"] = pd.to_datetime(fut_detail["日期"]).dt.normalize()
+            fut_detail = fut_detail.rename(columns={"日期": "date", "收盘价": "期货收盘价"})
+
+            spot_detail = _SPOT_DF.copy()
+            spot_detail = spot_detail.rename(columns={"date": "date", "spot_price": "现货参考价"})
+            spot_detail["date"] = pd.to_datetime(spot_detail["date"]).dt.normalize()
+
+            basis_detail = pd.merge(fut_detail, spot_detail, on="date", how="inner").sort_values("date").reset_index(drop=True)
+            basis_detail["价差"] = basis_detail["期货收盘价"] - basis_detail["现货参考价"]
+            basis_detail = basis_detail.rename(columns={"date": "日期"})
+            basis_detail["日期"] = basis_detail["日期"].dt.strftime("%Y-%m-%d")
+
+            if basis_detail.empty:
+                st.info("当前周期内暂无可对齐的市场现货价逐日数据。")
+            else:
+                st.dataframe(
+                    basis_detail.style.format({
+                        "期货收盘价": "{:,.0f}",
+                        "现货参考价": "{:,.0f}",
+                        "价差": "{:+,.0f}",
+                    }),
+                    use_container_width=True,
+                    height=420,
+                )
+        except Exception as e:
+            st.error(f"价差明细表生成失败：{e}")
+
     st.session_state.basis_data = {
         "spot_price": float(active_basis_price),
         "ref_spot_price": market_spot_price,
@@ -3389,7 +3415,6 @@ def render_basis_page(analyzer):
         "user_custom_basis": basis_candidates.get("用户自定义"),
         "real_purchase_basis": basis_candidates.get("真实采购成本"),
     }
-
 
 def render_inventory_page(analyzer):
     """库存管理（MVP）"""
