@@ -3990,14 +3990,16 @@ def render_report_page(analyzer):
         docx_bytes = build_report_docx_bytes("熵合科技-分析报告", lines)
 
         c1, c2, c3 = st.columns(3)
-                st.download_button(
+        with c1:
+            st.download_button(
                 label="下载 TXT",
                 data=report_text,
                 file_name=f"分析报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                 mime="text/plain",
                 use_container_width=True
             )
-                st.download_button(
+        with c2:
+            st.download_button(
                 label="下载 PDF",
                 data=pdf_bytes if pdf_bytes else report_text,
                 file_name=f"分析报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
