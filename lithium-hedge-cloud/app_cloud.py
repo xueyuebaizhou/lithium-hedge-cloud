@@ -2814,7 +2814,7 @@ def render_hedge_page(analyzer):
 
 
     st.markdown("---")
-    st.markdown("## 套保比例优化（历史法：不生成任何模拟价格）")
+    st.markdown("## 套保比例优化")
     with st.expander("打开：基于真实历史分布自动求解最优套保比例", expanded=False):
         st.caption("说明：使用真实历史“现货（内置表）+ 期货收盘价（AkShare/新浪）”对齐后的变动来做风险度量（历史 VaR / CVaR）。不做随机模拟、不生成任何虚构价格。")
         opt_days = st.slider("用于优化的历史窗口（交易日）", 60, 400, 180, 10)
@@ -2909,7 +2909,7 @@ def render_hedge_page(analyzer):
             except Exception as e:
                 st.error(f"优化计算失败：{e}")
 
-    st.markdown("## 策略保存与回溯（轻量版）")
+    st.markdown("## 策略保存与回溯")
     with st.expander("打开：将当前方案保存到“策略管理”", expanded=False):
         st.caption("说明：保存的是参数与当日（或最近交易日）期货收盘价快照，用于后续回溯。")
         strat_name = st.text_input("策略名称", value=f"LC套保_{datetime.now().strftime('%Y%m%d_%H%M')}")
