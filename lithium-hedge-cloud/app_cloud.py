@@ -3849,12 +3849,12 @@ def render_scenario_page(analyzer):
             worst = fdf.nsmallest(int(topn), "ret_1d")[["date","ret_1d","close"]]
             best = fdf.nlargest(int(topn), "ret_1d")[["date","ret_1d","close"]]
             c1, c2 = st.columns(2)
-                        st.markdown("### 最差跌幅日")
+            with c1:
+                st.markdown("### 最差跌幅日")
                 st.dataframe(worst.assign(ret_1d=worst["ret_1d"]*100).rename(columns={"ret_1d":"跌幅(%)","close":"收盘价"}), use_container_width=True)
-                        st.markdown("### 最强涨幅日")
+            with c2:
+                st.markdown("### 最强涨幅日")
                 st.dataframe(best.assign(ret_1d=best["ret_1d"]*100).rename(columns={"ret_1d":"涨幅(%)","close":"收盘价"}), use_container_width=True)
-
-            # 将极端日映射到库存盈亏（以当前参数）
             Q = float(inventory)
             # 用百分比冲击近似作用于“测算基准价/现货参考价”（如果你未来用企业合同价，可替换）
             base_price = float(cost_price) if float(cost_price) > 0 else float(fdf["close"].iloc[-1])
