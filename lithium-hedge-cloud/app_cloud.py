@@ -3199,15 +3199,17 @@ def _series_last_bool(df: 'pd.DataFrame', col: str, default: bool = False) -> bo
         return default
 
 def render_basis_page(analyzer):
-    """渲染期货-市场参考价差页面
+    """渲染多基准价差页面。
 
-    数据口径：
-    - 期货价格：AkShare `futures_zh_daily_sina`（新浪财经日频）
-    - 现货参考价：定期更新的现货价格表（系统内置，按你提供的表格更新）
-    - 价差（展示）：期货主力 - 测算基准价（默认取现货表价，可手动覆盖）
+    支持三种基准口径：
+    1. 市场现货价
+    2. 用户自定义
+    3. 真实采购成本
+
+    主界面只展示当前选中的口径，并在下方提供三口径对比表，避免信息混乱。
     """
     st.markdown("<h1>期货-市场参考价差走势</h1>", unsafe_allow_html=True)
-    st.caption("现货为市场参考价（统计口径），用于套保分析口径对齐。")
+    st.caption("支持按市场现货价、用户自定义、真实采购成本三种口径查看价差。")
 
     col_left, col_right = st.columns([2, 1])
 
@@ -3223,10 +3225,6 @@ def render_basis_page(analyzer):
             index=2,
         )
 
-    # ==========================
-    # 市场参考价（现货）：按期货日期自动匹配
-    # ==========================
-    # 先取期货数据（真实） & 价差计算
     period_map = {"最近1个月": 30, "最近3个月": 90, "最近6个月": 180, "最近1年": 365}
     price_data = analyzer.fetch_real_time_data(
         symbol=symbol,
@@ -3243,7 +3241,6 @@ def render_basis_page(analyzer):
 
     display_data = price_data.tail(period_map[period]).copy()
 
-    # 兼容不同数据源列名（避免 KeyError: '日期'）
     if not display_data.empty:
         if "日期" not in display_data.columns:
             if "date" in display_data.columns:
@@ -3255,7 +3252,6 @@ def render_basis_page(analyzer):
         if "日期" in display_data.columns:
             display_data["日期"] = pd.to_datetime(display_data["日期"], errors="coerce")
 
-    # 兼容不同数据源列名（避免 KeyError: '收盘价'）
     if "收盘价" not in display_data.columns:
         for cand in ["收盘", "close", "Close", "收盘价(元)", "结算价", "结算"]:
             if cand in display_data.columns:
@@ -3268,67 +3264,93 @@ def render_basis_page(analyzer):
     update_time = display_data["日期"].iloc[-1]
     spot_date_str = pd.to_datetime(update_time).strftime("%Y%m%d")
     spot_info = analyzer.fetch_spot_price_from_excel(date=spot_date_str)
-    ref_price = spot_info.get("price")
+    market_spot_price = spot_info.get("price")
+    market_spot_price = float(market_spot_price) if (market_spot_price is not None and float(market_spot_price) > 0) else None
     ref_source = spot_info.get("source", "LOCAL_TABLE")
-    ref_detail = spot_info.get("detail", "")
     ref_is_sim = bool(spot_info.get("is_simulated", True))
 
-    display_ref_price = float(ref_price) if (ref_price is not None and float(ref_price) > 0) else None
-
     with col_right:
-        if display_ref_price is None:
-            st.markdown("**暂无**")
-            
-        else:
-            st.metric("现货参考价", f"{display_ref_price:,.0f} 元/吨")
-            
-            
+        basis_mode = st.radio(
+            "基准来源",
+            ["市场现货价", "用户自定义", "真实采购成本"],
+            index=["市场现货价", "用户自定义", "真实采购成本"].index(
+                st.session_state.get("basis_mode", "市场现货价")
+            ),
+            key="basis_mode",
+        )
 
-        # 仅在需要时提示“企业真实价”声明（保持长期约束逻辑）
+        if market_spot_price is None:
+            st.metric("市场现货价", "暂无")
+        else:
+            st.metric("市场现货价", f"{market_spot_price:,.0f} 元/吨")
+
+        user_custom_basis = st.number_input(
+            "用户自定义基准价",
+            min_value=0.0,
+            value=float(st.session_state.get("basis_user_custom_price", market_spot_price or 0.0)),
+            step=500.0,
+            key="basis_user_custom_price",
+        )
+
+        real_purchase_basis = st.number_input(
+            "真实采购成本",
+            min_value=0.0,
+            value=float(st.session_state.get("basis_real_purchase_price", 0.0)),
+            step=500.0,
+            key="basis_real_purchase_price",
+        )
+
         user_confirm_real = st.checkbox(
-            "我确认下方输入价格为企业真实成交/合同价",
+            "我确认“真实采购成本”为企业真实采购/合同成本",
             value=bool(st.session_state.get("basis_user_confirm_real", False)),
             key="basis_user_confirm_real",
         )
 
-        default_calc = display_ref_price if display_ref_price is not None else 0.0
-        analysis_ref_price = st.number_input(
-            "测算基准价",
-            min_value=0.0,
-            value=float(st.session_state.get("basis_analysis_ref_price", default_calc)),
-            step=500.0,
+    basis_candidates = {
+        "市场现货价": market_spot_price,
+        "用户自定义": float(user_custom_basis) if float(user_custom_basis) > 0 else None,
+        "真实采购成本": float(real_purchase_basis) if float(real_purchase_basis) > 0 else None,
+    }
+
+    active_basis_price = basis_candidates.get(basis_mode)
+    active_basis_label = basis_mode
+
+    if active_basis_price is None:
+        st.markdown(
+            "<div style='color:#b00020;font-weight:700'>当前基准价无有效数值，禁止用于对外报告</div>",
+            unsafe_allow_html=True,
         )
-        st.session_state.basis_analysis_ref_price = analysis_ref_price
+        return
 
-        # 若表格缺失且未声明为企业真实成交/合同价，按长期约束：必须红字提示
-        if (not user_confirm_real) and ((ref_is_sim) or (display_ref_price is None) or (analysis_ref_price <= 0)):
-            st.markdown(
-                "<div style='color:#b00020;font-weight:700'>当前为模拟数据，禁止用于对外报告</div>",
-                unsafe_allow_html=True,
-            )
+    if basis_mode == "市场现货价" and (ref_is_sim or market_spot_price is None):
+        st.markdown(
+            "<div style='color:#b00020;font-weight:700'>当前为模拟数据，禁止用于对外报告</div>",
+            unsafe_allow_html=True,
+        )
+    if basis_mode == "真实采购成本" and not user_confirm_real:
+        st.markdown(
+            "<div style='color:#b00020;font-weight:700'>未确认真实采购成本来源，禁止用于对外报告</div>",
+            unsafe_allow_html=True,
+        )
 
-        if (display_ref_price is not None) and (not ref_is_sim):
-            st.session_state.basis_ref_price_cache = float(display_ref_price)
-
-    # 价差 = 期货主力 - 测算基准价
-    display_data["价差"] = display_data["收盘价"] - analysis_ref_price
+    display_data["价差"] = display_data["收盘价"] - float(active_basis_price)
 
     latest_futures = float(display_data["收盘价"].iloc[-1])
-    latest_diff = latest_futures - analysis_ref_price
+    latest_diff = latest_futures - float(active_basis_price)
     update_time = display_data["日期"].iloc[-1]
 
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("现货参考价", ("暂无" if display_ref_price is None else f"{display_ref_price:,.0f}"))
-    col_m2.metric("测算基准价", f"{analysis_ref_price:,.0f}")
+    col_m1.metric("当前基准来源", active_basis_label)
+    col_m2.metric("当前基准价", f"{float(active_basis_price):,.0f}")
     col_m3.metric("期货收盘价", f"{latest_futures:,.0f}")
-    col_m4.metric("价差", f"{latest_diff:+,.0f}")
+    col_m4.metric(f"价差（基于{active_basis_label}）", f"{latest_diff:+,.0f}")
 
     st.caption(f"现货、期货数据更新时间：{update_time.strftime('%Y-%m-%d')}")
 
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(display_data["日期"], display_data["价差"], linewidth=2.2)
     ax.axhline(0, linestyle="--", linewidth=1)
-    ax.set_title("价差走势", fontsize=15, fontweight="bold")
+    ax.set_title(f"价差走势（{active_basis_label}）", fontsize=15, fontweight="bold")
     ax.set_xlabel("日期")
     ax.set_ylabel("价差 (元/吨)")
     ax.grid(True, alpha=0.3, linestyle="--")
@@ -3336,16 +3358,36 @@ def render_basis_page(analyzer):
     plt.tight_layout()
     st.pyplot(fig)
 
-    # 兼容旧字段：basis/spot_price 仍保留，但含义已调整为“期货-市场参考价差/测算基准价”
+    st.markdown("### 三种口径对比")
+    compare_rows = []
+    for label, price in basis_candidates.items():
+        if price is None:
+            diff_txt = "暂无"
+            price_txt = "暂无"
+        else:
+            diff_txt = f"{latest_futures - float(price):+,.0f}"
+            price_txt = f"{float(price):,.0f}"
+        compare_rows.append({
+            "基准口径": label,
+            "基准价（元/吨）": price_txt,
+            "当前价差": diff_txt,
+            "是否当前生效": "是" if label == active_basis_label else "否",
+        })
+    st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, hide_index=True)
+
     st.session_state.basis_data = {
-        "spot_price": analysis_ref_price,
-        "ref_spot_price": display_ref_price,
+        "spot_price": float(active_basis_price),
+        "ref_spot_price": market_spot_price,
         "ref_spot_source": ref_source,
-        "analysis_spot_price": analysis_ref_price,
+        "analysis_spot_price": float(active_basis_price),
         "futures_price": latest_futures,
         "basis": latest_diff,
         "diff": latest_diff,
         "update_time": update_time,
+        "basis_source_label": active_basis_label,
+        "basis_source_mode": basis_mode,
+        "user_custom_basis": basis_candidates.get("用户自定义"),
+        "real_purchase_basis": basis_candidates.get("真实采购成本"),
     }
 
 
