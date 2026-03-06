@@ -3321,14 +3321,14 @@ def render_basis_page(analyzer):
     col_m1.metric("现货参考价", ("暂无" if display_ref_price is None else f"{display_ref_price:,.0f}"))
     col_m2.metric("测算基准价", f"{analysis_ref_price:,.0f}")
     col_m3.metric("期货收盘价", f"{latest_futures:,.0f}")
-    col_m4.metric("价差（期货-基准）", f"{latest_diff:+,.0f}")
+    col_m4.metric("价差", f"{latest_diff:+,.0f}")
 
     st.caption(f"现货、期货数据更新时间：{update_time.strftime('%Y-%m-%d')}")
 
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(display_data["日期"], display_data["价差"], linewidth=2.2)
     ax.axhline(0, linestyle="--", linewidth=1)
-    ax.set_title("价差走势（期货主力 - 市场参考价）", fontsize=15, fontweight="bold")
+    ax.set_title("价差走势", fontsize=15, fontweight="bold")
     ax.set_xlabel("日期")
     ax.set_ylabel("价差 (元/吨)")
     ax.grid(True, alpha=0.3, linestyle="--")
@@ -3348,7 +3348,6 @@ def render_basis_page(analyzer):
         "update_time": update_time,
     }
 
-    st.caption("数据来源：现货（定期更新表格） / 期货（AkShare: futures_zh_daily_sina）。")
 
 def render_inventory_page(analyzer):
     """库存管理（MVP）"""
