@@ -2268,8 +2268,6 @@ def render_main_app(analyzer):
         f"{datetime.now().strftime('%Y-%m-%d')}</p>",
         unsafe_allow_html=True
     )
-    st.markdown('<p class="data-source">数据来源：akshare金融数据接口 | 数据更新：实时</p>',
-                unsafe_allow_html=True)
     st.divider()
 
     if st.session_state.current_page == "首页":
@@ -2366,7 +2364,6 @@ def render_home_page(analyzer):
     with st.expander("价格行情功能"):
         st.markdown("""
         **实时数据**：
-        - 来源：akshare金融数据接口
         - 合约：LC0主力合约及月合约
         - 频率：日度数据，自动更新
         
