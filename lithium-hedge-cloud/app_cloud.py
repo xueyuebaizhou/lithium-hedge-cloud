@@ -3868,7 +3868,7 @@ def render_scenario_page(analyzer):
             base_price = float(cost_price) if float(cost_price) > 0 else float(fdf["close"].iloc[-1])
             worst_pnl = -Q * base_price * worst["ret_1d"]  # 价格下跌，库存亏损为负（这里取负号便于解释）
             best_pnl  = -Q * base_price * best["ret_1d"]
-            st.markdown("### 以当前库存/成本价估算的压力盈亏（仅用于压力测试解释）")
+            st.markdown("### 以当前库存/成本价估算的压力盈亏")
             df_pnl = pd.concat([
                 worst.assign(压力盈亏_元=worst_pnl.values).rename(columns={"ret_1d":"日收益率"}),
                 best.assign(压力盈亏_元=best_pnl.values).rename(columns={"ret_1d":"日收益率"})
