@@ -3841,7 +3841,7 @@ def render_scenario_page(analyzer):
 
 
     st.markdown("---")
-    st.markdown("## 历史极端情景（自动提取，非模拟）")
+    st.markdown("## 历史极端情景")
     with st.expander("打开：从真实历史数据中抽取最极端的涨跌日作为压力测试", expanded=False):
         lookback = st.slider("回看窗口（交易日）", 60, 500, 250, 10, key="hist_scn_lb")
         topn = st.slider("展示极端情景数量", 3, 20, 10, 1, key="hist_scn_topn")
