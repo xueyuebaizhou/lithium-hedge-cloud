@@ -3224,60 +3224,9 @@ def render_basis_page(analyzer):
         )
 
     # ==========================
-    # 市场参考价（现货）：定期更新表格
+    # 市场参考价（现货）：按期货日期自动匹配
     # ==========================
-    st.caption("市场参考价（现货） 默认取不晚于该日期的最近一条现货参考价。")
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        spot_date = st.date_input("现货参考价日期", value=datetime.now().date())
-    spot_date_str = spot_date.strftime("%Y%m%d")
-    spot_info = analyzer.fetch_spot_price_from_excel(date=spot_date_str)
-    ref_price = spot_info.get("price")
-    ref_source = spot_info.get("source", "LOCAL_TABLE")
-    ref_detail = spot_info.get("detail", "")
-    ref_is_sim = bool(spot_info.get("is_simulated", True))
-
-    display_ref_price = float(ref_price) if (ref_price is not None and float(ref_price) > 0) else None
-
-    with col_right:
-        st.markdown("### 现货参考价")
-        if display_ref_price is None:
-            st.markdown("**暂无**")
-            
-        else:
-            st.metric("现货参考价", f"{display_ref_price:,.0f} 元/吨")
-            
-            
-
-        # 仅在需要时提示“企业真实价”声明（保持长期约束逻辑）
-        user_confirm_real = st.checkbox(
-            "我确认下方输入价格为企业真实成交/合同价",
-            value=bool(st.session_state.get("basis_user_confirm_real", False)),
-            key="basis_user_confirm_real",
-        )
-
-        default_calc = display_ref_price if display_ref_price is not None else 0.0
-        analysis_ref_price = st.number_input(
-            "测算基准价",
-            min_value=0.0,
-            value=float(st.session_state.get("basis_analysis_ref_price", default_calc)),
-            step=500.0,
-        )
-        st.session_state.basis_analysis_ref_price = analysis_ref_price
-
-        # 若表格缺失且未声明为企业真实成交/合同价，按长期约束：必须红字提示
-        if (not user_confirm_real) and ((ref_is_sim) or (display_ref_price is None) or (analysis_ref_price <= 0)):
-            st.markdown(
-                "<div style='color:#b00020;font-weight:700'>当前为模拟数据，禁止用于对外报告</div>",
-                unsafe_allow_html=True,
-            )
-
-        if (display_ref_price is not None) and (not ref_is_sim):
-            st.session_state.basis_ref_price_cache = float(display_ref_price)
-
-    # ==========================
-    # 期货数据（真实） & 价差计算
-    # ==========================
+    # 先取期货数据（真实） & 价差计算
     period_map = {"最近1个月": 30, "最近3个月": 90, "最近6个月": 180, "最近1年": 365}
     price_data = analyzer.fetch_real_time_data(
         symbol=symbol,
@@ -3316,6 +3265,51 @@ def render_basis_page(analyzer):
         st.error(f"期货数据缺少收盘价列，无法计算价差。当前列：{list(display_data.columns)}")
         return
 
+    update_time = display_data["日期"].iloc[-1]
+    spot_date_str = pd.to_datetime(update_time).strftime("%Y%m%d")
+    spot_info = analyzer.fetch_spot_price_from_excel(date=spot_date_str)
+    ref_price = spot_info.get("price")
+    ref_source = spot_info.get("source", "LOCAL_TABLE")
+    ref_detail = spot_info.get("detail", "")
+    ref_is_sim = bool(spot_info.get("is_simulated", True))
+
+    display_ref_price = float(ref_price) if (ref_price is not None and float(ref_price) > 0) else None
+
+    with col_right:
+        if display_ref_price is None:
+            st.markdown("**暂无**")
+            
+        else:
+            st.metric("现货参考价", f"{display_ref_price:,.0f} 元/吨")
+            
+            
+
+        # 仅在需要时提示“企业真实价”声明（保持长期约束逻辑）
+        user_confirm_real = st.checkbox(
+            "我确认下方输入价格为企业真实成交/合同价",
+            value=bool(st.session_state.get("basis_user_confirm_real", False)),
+            key="basis_user_confirm_real",
+        )
+
+        default_calc = display_ref_price if display_ref_price is not None else 0.0
+        analysis_ref_price = st.number_input(
+            "测算基准价",
+            min_value=0.0,
+            value=float(st.session_state.get("basis_analysis_ref_price", default_calc)),
+            step=500.0,
+        )
+        st.session_state.basis_analysis_ref_price = analysis_ref_price
+
+        # 若表格缺失且未声明为企业真实成交/合同价，按长期约束：必须红字提示
+        if (not user_confirm_real) and ((ref_is_sim) or (display_ref_price is None) or (analysis_ref_price <= 0)):
+            st.markdown(
+                "<div style='color:#b00020;font-weight:700'>当前为模拟数据，禁止用于对外报告</div>",
+                unsafe_allow_html=True,
+            )
+
+        if (display_ref_price is not None) and (not ref_is_sim):
+            st.session_state.basis_ref_price_cache = float(display_ref_price)
+
     # 价差 = 期货主力 - 测算基准价
     display_data["价差"] = display_data["收盘价"] - analysis_ref_price
 
@@ -3329,7 +3323,7 @@ def render_basis_page(analyzer):
     col_m3.metric("期货收盘价", f"{latest_futures:,.0f}")
     col_m4.metric("价差（期货-基准）", f"{latest_diff:+,.0f}")
 
-    st.caption(f"期货数据更新时间：{update_time.strftime('%Y-%m-%d')}")
+    st.caption(f"现货、期货数据更新时间：{update_time.strftime('%Y-%m-%d')}")
 
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(display_data["日期"], display_data["价差"], linewidth=2.2)
@@ -3855,11 +3849,9 @@ def render_scenario_page(analyzer):
             worst = fdf.nsmallest(int(topn), "ret_1d")[["date","ret_1d","close"]]
             best = fdf.nlargest(int(topn), "ret_1d")[["date","ret_1d","close"]]
             c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("### 最差跌幅日")
+                        st.markdown("### 最差跌幅日")
                 st.dataframe(worst.assign(ret_1d=worst["ret_1d"]*100).rename(columns={"ret_1d":"跌幅(%)","close":"收盘价"}), use_container_width=True)
-            with c2:
-                st.markdown("### 最强涨幅日")
+                        st.markdown("### 最强涨幅日")
                 st.dataframe(best.assign(ret_1d=best["ret_1d"]*100).rename(columns={"ret_1d":"涨幅(%)","close":"收盘价"}), use_container_width=True)
 
             # 将极端日映射到库存盈亏（以当前参数）
@@ -3998,16 +3990,14 @@ def render_report_page(analyzer):
         docx_bytes = build_report_docx_bytes("熵合科技-分析报告", lines)
 
         c1, c2, c3 = st.columns(3)
-        with c1:
-            st.download_button(
+                st.download_button(
                 label="下载 TXT",
                 data=report_text,
                 file_name=f"分析报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                 mime="text/plain",
                 use_container_width=True
             )
-        with c2:
-            st.download_button(
+                st.download_button(
                 label="下载 PDF",
                 data=pdf_bytes if pdf_bytes else report_text,
                 file_name=f"分析报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
