@@ -2301,60 +2301,47 @@ def render_main_app(analyzer):
 def render_home_page(analyzer):
     """渲染首页"""
     st.markdown("<h1>系统首页</h1>", unsafe_allow_html=True)
-    
-    # 欢迎信息
+
     user_info = st.session_state.user_info
     st.markdown(f"### 欢迎回来，{user_info['username']}！")
-    
-    # 快速开始卡片
 
     st.markdown("### 快速开始")
-    
     col1, col2, col3 = st.columns(3)
-    
-    
-with col1:
-    st.markdown("""
-    <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;">
-    <h3>套保计算</h3>
-    <p style="color:#6e6e73;">基于当前市场价格，计算最优套保方案</p>
-    </div>
-    """,unsafe_allow_html=True)
-    if st.button("开始计算", key="home_calc", use_container_width=True):
-        st.session_state.current_page = "套保计算"
-        st.rerun()
 
-    
-    
-with col2:
-    st.markdown("""
-    <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;">
-    <h3>价格行情</h3>
-    <p style="color:#6e6e73;">查看碳酸锂期货实时价格走势</p>
-    </div>
-    """,unsafe_allow_html=True)
-    if st.button("查看行情", key="home_price", use_container_width=True):
-        st.session_state.current_page = "价格行情"
-        st.rerun()
+    with col1:
+        st.markdown("""
+        <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;min-height:140px;display:flex;flex-direction:column;justify-content:center;">
+        <h3 style="margin-bottom:10px;">套保计算</h3>
+        <p style="color:#6e6e73;margin:0;">基于当前市场价格，计算最优套保方案</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("开始计算", key="home_calc", use_container_width=True):
+            st.session_state.current_page = "套保计算"
+            st.rerun()
 
-    
-    
-with col3:
-    st.markdown("""
-    <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;">
-    <h3>分析历史</h3>
-    <p style="color:#6e6e73;">查看您的历史分析记录</p>
-    </div>
-    """,unsafe_allow_html=True)
-    if st.button("查看历史", key="home_history", use_container_width=True):
-        st.session_state.current_page = "分析历史"
-        st.rerun()
+    with col2:
+        st.markdown("""
+        <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;min-height:140px;display:flex;flex-direction:column;justify-content:center;">
+        <h3 style="margin-bottom:10px;">价格行情</h3>
+        <p style="color:#6e6e73;margin:0;">查看碳酸锂期货实时价格走势</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("查看行情", key="home_price", use_container_width=True):
+            st.session_state.current_page = "价格行情"
+            st.rerun()
 
-    
-    # 系统功能介绍
+    with col3:
+        st.markdown("""
+        <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;min-height:140px;display:flex;flex-direction:column;justify-content:center;">
+        <h3 style="margin-bottom:10px;">分析历史</h3>
+        <p style="color:#6e6e73;margin:0;">查看您的历史分析记录</p>
+        </div>
+        """, unsafe_allow_html=True)
+        if st.button("查看历史", key="home_history", use_container_width=True):
+            st.session_state.current_page = "分析历史"
+            st.rerun()
 
     st.markdown("### 系统功能")
-    
 
     with st.expander("套保计算功能", expanded=True):
         st.markdown("""
@@ -2363,32 +2350,31 @@ with col3:
         2. **情景模拟**：价格变动±50%到+100%的盈亏分析
         3. **保证金计算**：自动计算期货交易所需保证金
         4. **风险提示**：根据套保比例提供风险建议
-        
+
         **计算参数**：
         - 存货成本价：0-500,000元/吨
         - 存货数量：0-10,000吨
         - 套保比例：0%-100%
         - 保证金比例：默认15%（可配置）
         """)
-    
+
     with st.expander("价格行情功能"):
         st.markdown("""
         **实时数据**：
         - 合约：LC0主力合约及月合约
         - 频率：日度数据，自动更新
-        
+
         **分析图表**：
         - 价格走势图
         - 移动平均线
         - 关键点标注
         - 统计信息
-        
+
         **数据管理**：
         - 云端缓存30分钟
         - 手动刷新功能
         - 多周期查看
         """)
-    
 
     with st.expander("云端功能"):
         st.markdown("""
@@ -2396,19 +2382,19 @@ with col3:
         - 用户数据安全存储在Supabase云端
         - 分析历史永久保存
         - 多设备同步访问
-        
+
         **用户管理**：
         - 注册/登录/注销
         - 密码找回（邮箱验证）
         - 个性化设置
         - 数据隐私保护
-        
+
         **安全特性**：
         - 密码bcrypt加密
         - HTTPS安全传输
         - 数据访问控制
         """)
-    
+
     with st.expander("新增功能模块"):
         st.markdown("""
         - 价差走势与价格指数展示
@@ -2417,27 +2403,18 @@ with col3:
         - 多情景分析与对比表格
         - 分析报告汇总输出
         """)
-    
-    # 技术架构
-    
-    
-    # 侧边栏显示实时价格
+
     with st.sidebar:
         st.markdown("### 实时价格")
         try:
             price_data = analyzer.fetch_real_time_data(force_refresh=st.session_state.force_refresh)
             if st.session_state.force_refresh:
                 st.session_state.force_refresh = False
-            
+
             if not price_data.empty:
                 latest_price = price_data['收盘价'].iloc[-1]
                 latest_date = price_data['日期'].iloc[-1]
-                
-                if '涨跌幅' in price_data.columns:
-                    price_change = price_data['涨跌幅'].iloc[-1]
-                else:
-                    price_change = 0
-                
+                price_change = price_data['涨跌幅'].iloc[-1] if '涨跌幅' in price_data.columns else 0
                 delta_color = "normal" if price_change >= 0 else "inverse"
                 st.metric(
                     label="碳酸锂期货",
@@ -2446,8 +2423,9 @@ with col3:
                     delta_color=delta_color
                 )
                 st.caption(f"更新时间：{latest_date.strftime('%Y-%m-%d')}")
-        except:
+        except Exception:
             st.warning("无法获取实时价格")
+
 def render_hedge_page(analyzer):
     """渲染套保计算页面"""
     st.markdown("<h1>套保计算器</h1>", unsafe_allow_html=True)
@@ -3435,18 +3413,14 @@ def render_inventory_page(analyzer):
         or st.session_state.get("user_id")
         or ""
     )
-
-    # Ultimate fallback: derive from username to keep MVP usable
     if (not user_id) and isinstance(user_info, dict):
         uname = (user_info.get("username") or "").strip()
         if uname:
             user_id = f"user::{uname}"
             st.session_state.user_id = user_id
-
     if not user_id:
         st.error("未获取到用户ID（登录返回未包含 user.id）。请重新登录，或检查 Supabase Auth 返回。")
         return
-
     if isinstance(user_id, str) and user_id.startswith("user::"):
         st.warning("提示：当前登录返回未包含用户ID，系统临时使用用户名作为云端数据键（仅建议用于演示）。")
 
@@ -3454,18 +3428,29 @@ def render_inventory_page(analyzer):
 
     with tab1:
         col1, col2 = st.columns(2)
-        
-with col1:
-    st.markdown("""
-    <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;">
-    <h3>套保计算</h3>
-    <p style="color:#6e6e73;">基于当前市场价格，计算最优套保方案</p>
-    </div>
-    """,unsafe_allow_html=True)
-    if st.button("开始计算", key="home_calc", use_container_width=True):
-        st.session_state.current_page = "套保计算"
-        st.rerun()
+        with col1:
+            txn_date = st.date_input("日期", value=datetime.now().date(), key="inv_date")
+            txn_type = st.selectbox("类型", ["入库", "出库"], key="inv_type")
+            grade = st.text_input("品级", value="电池级", key="inv_grade")
+            warehouse = st.text_input("仓库", value="默认仓", key="inv_warehouse")
+        with col2:
+            qty_ton = st.number_input("数量（吨）", min_value=0.0, value=0.0, step=1.0, key="inv_qty")
+            unit_cost = st.number_input("单位成本（元/吨）", min_value=0.0, value=0.0, step=500.0, key="inv_cost")
+            notes = st.text_area("备注", key="inv_notes")
 
+        if st.button("保存库存记录", type="primary", use_container_width=True, key="save_inventory_txn"):
+            rec = {
+                "date": str(txn_date),
+                "txn_type": txn_type,
+                "grade": grade,
+                "warehouse": warehouse,
+                "qty_ton": float(qty_ton),
+                "unit_cost": float(unit_cost),
+                "notes": notes,
+            }
+            if analyzer.save_inventory_txn(user_id, rec):
+                st.success("库存记录已保存。")
+                st.rerun()
             else:
                 st.error("保存失败，请稍后重试。")
 
@@ -3475,7 +3460,6 @@ with col1:
         st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
         if meta.get("simulated"):
-            # 保留项目长期约束：若存在缺失/异常导致“估算/不完整”，必须红字提示
             st.markdown(
                 "<p style='color:red;font-weight:600;'>当前为模拟数据，禁止用于对外报告</p>",
                 unsafe_allow_html=True
@@ -3488,7 +3472,6 @@ with col1:
         if df.empty:
             st.info("暂无库存记录。请先在“新增记录”里录入入库/出库。")
         else:
-            # 只展示关键列
             show_cols = [c for c in ["date","txn_type","grade","warehouse","qty_ton","unit_cost","notes"] if c in df.columns]
             st.dataframe(df[show_cols], use_container_width=True, hide_index=True)
 
@@ -3500,7 +3483,6 @@ with col1:
             else:
                 csv = df.to_csv(index=False).encode("utf-8-sig")
                 st.download_button("下载 CSV", data=csv, file_name="inventory_ledger.csv", mime="text/csv")
-
 
     st.markdown("---")
     st.markdown("## 库存风险热力图")
@@ -3515,8 +3497,6 @@ with col1:
             fdf = fdf.rename(columns={"日期":"date","收盘价":"close"})[["date","close"]].dropna()
             fdf["date"] = pd.to_datetime(fdf["date"]).dt.normalize()
             fdf = fdf.sort_values("date").tail(int(lookback)).reset_index(drop=True)
-
-            # 计算不同周期的价值变化（用期货收盘价做锚点；若你未来接入企业合同价，可替换为合同价序列）
             mat = []
             idx_names = []
             for h in horizons:
@@ -3525,14 +3505,12 @@ with col1:
                 row = []
                 for a in alphas:
                     var, cvar = compute_historical_var_cvar(pnl, alpha=a)
-                    row.append(cvar if cvar is not None else np.nan)  # 用 CVaR 更保守
+                    row.append(cvar if cvar is not None else np.nan)
                 mat.append(row)
                 idx_names.append(f"{h}日")
             heat = pd.DataFrame(mat, index=idx_names, columns=[f"alpha={a}" for a in alphas])
             st.dataframe(heat.style.format("{:,.0f}"), use_container_width=True)
             st.caption("表格数值为 CVaR（单位：元），越小（越负）代表尾部风险越大。")
-
-            # 简单可视化：选择一个周期展示PnL分布
             h_pick = st.selectbox("查看PnL分布（周期）", horizons, index=0, key="inv_risk_hpick")
             dP2 = fdf["close"].diff(int(h_pick)).dropna()
             pnl2 = float(qty) * dP2
@@ -3552,18 +3530,14 @@ def render_profit_page(analyzer):
         or st.session_state.get("user_id")
         or ""
     )
-
-    # Ultimate fallback: derive from username to keep MVP usable
     if (not user_id) and isinstance(user_info, dict):
         uname = (user_info.get("username") or "").strip()
         if uname:
             user_id = f"user::{uname}"
             st.session_state.user_id = user_id
-
     if not user_id:
         st.error("未获取到用户ID（登录返回未包含 user.id）。请重新登录，或检查 Supabase Auth 返回。")
         return
-
     if isinstance(user_id, str) and user_id.startswith("user::"):
         st.warning("提示：当前登录返回未包含用户ID，系统临时使用用户名作为云端数据键（仅建议用于演示）。")
 
@@ -3571,18 +3545,27 @@ def render_profit_page(analyzer):
 
     with tab1:
         col1, col2 = st.columns(2)
-        
-with col1:
-    st.markdown("""
-    <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;">
-    <h3>套保计算</h3>
-    <p style="color:#6e6e73;">基于当前市场价格，计算最优套保方案</p>
-    </div>
-    """,unsafe_allow_html=True)
-    if st.button("开始计算", key="home_calc", use_container_width=True):
-        st.session_state.current_page = "套保计算"
-        st.rerun()
+        with col1:
+            sales_date = st.date_input("销售日期", value=datetime.now().date(), key="sales_date")
+            grade = st.text_input("销售品级", value="电池级", key="sales_grade")
+            qty_ton = st.number_input("销售数量（吨）", min_value=0.0, value=0.0, step=1.0, key="sales_qty")
+        with col2:
+            unit_price = st.number_input("销售单价（元/吨）", min_value=0.0, value=0.0, step=500.0, key="sales_price")
+            override_cost = st.number_input("指定成本（元/吨，可选）", min_value=0.0, value=0.0, step=500.0, key="sales_override_cost")
+            notes = st.text_area("备注", key="sales_notes")
 
+        if st.button("保存销售记录", type="primary", use_container_width=True, key="save_sales_txn"):
+            rec = {
+                "date": str(sales_date),
+                "grade": grade,
+                "qty_ton": float(qty_ton),
+                "unit_price": float(unit_price),
+                "override_cost": float(override_cost),
+                "notes": notes,
+            }
+            if analyzer.save_sales_txn(user_id, rec):
+                st.success("销售记录已保存。")
+                st.rerun()
             else:
                 st.error("保存失败，请稍后重试。")
 
@@ -3601,10 +3584,8 @@ with col1:
         colB.metric("累计成本", f"{total_cogs:,.0f} 元")
         colC.metric("累计毛利", f"{total_gross:,.0f} 元")
 
-        # 套保损益（如果已有）
         hedge_pnl = 0.0
         try:
-            # 优先从 session_state 里拿最近一次套保计算结果
             hedge_result = st.session_state.get("hedge_result") or {}
             hedge_pnl = float(hedge_result.get("estimated_pnl", 0.0) or 0.0)
         except Exception:
@@ -3627,7 +3608,6 @@ with col1:
             else:
                 csv = profit_df.to_csv(index=False).encode("utf-8-sig")
                 st.download_button("下载 CSV", data=csv, file_name="profit_report.csv", mime="text/csv")
-
 
 def render_option_page(analyzer):
     """渲染期权保险计算页面"""
