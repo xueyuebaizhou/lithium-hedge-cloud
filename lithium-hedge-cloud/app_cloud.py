@@ -2599,7 +2599,7 @@ def render_home_page(analyzer):
         st.rerun()
 
     st.markdown("<div class='section-title'>系统功能</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-subtle'>内容不做扩充，仅以更清晰的分组展示原有说明。</div>", unsafe_allow_html=True)
+
 
     with st.expander("套保计算功能", expanded=True):
         st.markdown("""
@@ -4784,3 +4784,4 @@ if __name__ == "__main__":
         st.error(f"应用程序运行出错: {str(e)}")
         st.code(traceback.format_exc())
         st.info("请检查：\n1. 网络连接\n2. 环境变量配置\n3. 依赖包安装")
+
