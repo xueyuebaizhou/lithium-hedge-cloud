@@ -1614,8 +1614,11 @@ class CloudLithiumAnalyzer:
             bbox=dict(boxstyle="round,pad=0.3", alpha=0.2),
         )
 
-        _matplotlib_style(ax, "套保情景分析", "价格变动（%）", "盈亏（百万元）")
-        ax.legend(loc="best", fontsize=9, frameon=False)
+        ax.set_title("套保情景分析")
+        ax.set_xlabel("价格变动（%）")
+        ax.set_ylabel("盈亏（百万元）")
+        ax.grid(True, alpha=0.25)
+        ax.legend(loc="best", fontsize=9)
 
         suggestions = []
         if hedge_ratio == 0:
@@ -1975,293 +1978,68 @@ def main():
     # 自定义CSS
     st.markdown("""
     <style>
-    :root {
-        --bg: #f5f7fb;
-        --card: #ffffff;
-        --line: #e7ecf3;
-        --text: #172033;
-        --muted: #667085;
-        --primary: #1d4ed8;
-        --primary-soft: rgba(29, 78, 216, 0.10);
-        --shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
-        --radius: 18px;
+    html, body, [class*="css"]  {
+        font-family: "SF Pro Display", "Helvetica Neue", Arial, sans-serif;
+        background-color: #f5f5f7;
     }
-
-    html, body, [class*="css"] {
-        font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
-    }
-
-    .stApp {
-        background: var(--bg);
-        color: var(--text);
-    }
-
-    [data-testid="stAppViewContainer"] {
-        background: var(--bg);
-    }
-
-    [data-testid="stHeader"] {
-        background: rgba(245, 247, 251, 0.88);
-    }
-
-    .block-container {
-        padding-top: 1.3rem;
-        padding-bottom: 2.5rem;
-        max-width: 1280px;
-    }
-
-    [data-testid="stSidebar"] {
-        background: #ffffff;
-        border-right: 1px solid var(--line);
-    }
-
-    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
-    [data-testid="stSidebar"] label,
-    [data-testid="stSidebar"] div {
-        color: var(--text);
-    }
-
     .main-header {
-        font-size: 2.4rem;
-        font-weight: 800;
-        color: var(--text);
+        font-size: 2.2rem;
+        font-weight: 600;
+        color: #1c1c1e;
         text-align: center;
-        letter-spacing: -0.02em;
-        margin: 0.2rem 0 0.2rem 0;
+        margin-bottom: 0.75rem;
     }
-
-    .topbar-wrap {
-        background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
-        border: 1px solid var(--line);
-        border-radius: 24px;
-        padding: 24px 28px 20px 28px;
-        box-shadow: var(--shadow);
-        margin-bottom: 1.2rem;
-    }
-
-    .topbar-title {
-        font-size: 2.1rem;
-        font-weight: 800;
-        color: var(--text);
-        margin: 0;
-        text-align: center;
-        letter-spacing: -0.02em;
-    }
-
-    .topbar-row {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 16px;
-        margin-top: 10px;
-        color: var(--muted);
-        font-size: 0.96rem;
-        flex-wrap: wrap;
-    }
-
     .cloud-badge {
-        background: var(--primary-soft);
-        color: var(--primary);
-        padding: 6px 14px;
-        border-radius: 999px;
-        font-size: 0.78rem;
-        font-weight: 700;
-        display: inline-block;
-        border: 1px solid rgba(29, 78, 216, 0.10);
-    }
-
-    .page-title {
-        font-size: 2.15rem;
-        font-weight: 800;
-        color: var(--text);
-        margin: 0 0 0.35rem 0;
-        letter-spacing: -0.02em;
-    }
-
-    .section-title {
-        font-size: 1.55rem;
-        font-weight: 800;
-        color: var(--text);
-        margin: 1.3rem 0 0.9rem 0;
-        letter-spacing: -0.01em;
-    }
-
-    .section-subtle {
-        color: var(--muted);
-        font-size: 0.96rem;
-        margin-bottom: 0.8rem;
-    }
-
-    .hero-card {
-        background: linear-gradient(135deg, #ffffff 0%, #f7faff 100%);
-        border: 1px solid var(--line);
-        border-radius: 24px;
-        padding: 28px 28px 22px 28px;
-        box-shadow: var(--shadow);
-        margin-bottom: 1.1rem;
-    }
-
-    .hero-kicker {
-        color: var(--muted);
-        font-size: 0.95rem;
-        margin-bottom: 0.35rem;
-    }
-
-    .hero-title {
-        font-size: 2.35rem;
-        font-weight: 800;
-        color: var(--text);
-        line-height: 1.15;
-        margin: 0 0 0.4rem 0;
-        letter-spacing: -0.03em;
-    }
-
-    .hero-desc {
-        color: var(--muted);
-        font-size: 1rem;
-        margin: 0;
-    }
-
-    .soft-card {
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        padding: 20px 20px 18px 20px;
-        box-shadow: var(--shadow);
-        margin-bottom: 1rem;
-    }
-
-    .quick-card {
-        background: var(--card);
-        border: 1px solid var(--line);
+        background: rgba(10, 132, 255, 0.15);
+        color: #0a84ff;
+        padding: 4px 12px;
         border-radius: 18px;
-        padding: 18px 18px 16px 18px;
-        box-shadow: var(--shadow);
-        min-height: 158px;
-        margin-bottom: 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        display: inline-block;
+        margin-left: 8px;
+        vertical-align: middle;
     }
-
-    .quick-card-title {
-        font-size: 1.75rem;
-        font-weight: 800;
-        color: var(--text);
-        margin: 0 0 0.45rem 0;
-        letter-spacing: -0.02em;
+    .data-source {
+        font-size: 0.8rem;
+        color: #6e6e73;
+        text-align: right;
+        margin-top: -10px;
+        margin-bottom: 20px;
     }
-
-    .quick-card-desc {
-        color: var(--muted);
-        font-size: 0.95rem;
-        line-height: 1.65;
-        margin-bottom: 0.9rem;
-    }
-
-    .info-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 16px;
-    }
-
-    .info-card {
-        background: #ffffff;
-        border: 1px solid var(--line);
+    .card {
+        background: white;
         border-radius: 16px;
-        padding: 18px 18px 16px 18px;
-        box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+        padding: 16px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
     }
-
-    .info-card-title {
-        font-size: 1.05rem;
-        font-weight: 700;
-        color: var(--text);
-        margin-bottom: 0.55rem;
-    }
-
-    .info-card-desc {
-        color: var(--muted);
-        line-height: 1.72;
-        font-size: 0.94rem;
-        margin: 0;
-    }
-
     .stButton > button {
         border-radius: 12px;
-        border: 1px solid var(--line);
-        background: #ffffff;
-        color: var(--text);
-        min-height: 2.85rem;
-        font-weight: 700;
-        transition: all 0.18s ease;
-        box-shadow: none;
+        border: 1px solid #e5e5ea;
+        background: white;
+        transition: all 0.2s ease;
     }
-
     .stButton > button:hover {
-        border-color: rgba(29, 78, 216, 0.28);
-        color: var(--primary);
-        box-shadow: 0 8px 18px rgba(29, 78, 216, 0.08);
         transform: translateY(-1px);
+        box-shadow: 0 6px 14px rgba(0,0,0,0.08);
     }
-
+    
+    /* Ensure button text is always visible (especially primary buttons) */
+    .stButton > button { color: #1c1c1e; }
     button[kind="primary"], button[data-testid="baseButton-primary"] {
         color: #ffffff !important;
-        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+        background-color: #ff3b30 !important;
         border: none !important;
-        font-weight: 700 !important;
-        box-shadow: 0 10px 20px rgba(37, 99, 235, 0.18) !important;
+        font-weight: 600 !important;
     }
-
     button[kind="primary"]:hover, button[data-testid="baseButton-primary"]:hover {
         color: #ffffff !important;
-        filter: brightness(0.98);
+        filter: brightness(0.95);
     }
 
-    [data-testid="stMetric"] {
-        background: #ffffff;
-        border: 1px solid var(--line);
-        border-radius: 16px;
-        padding: 14px 16px;
-        box-shadow: var(--shadow);
-    }
-
-    [data-testid="stMetricLabel"] {
-        color: var(--muted);
-        font-weight: 600;
-    }
-
-    [data-testid="stExpander"] {
-        border: 1px solid var(--line) !important;
-        border-radius: 16px !important;
-        overflow: hidden;
-        background: #ffffff;
-        box-shadow: var(--shadow);
-        margin-bottom: 0.8rem;
-    }
-
-    [data-testid="stExpander"] details summary {
-        background: #fbfcfe;
-        font-weight: 700;
-        color: var(--text);
-    }
-
-    .stDataFrame, [data-testid="stTable"] {
-        background: #ffffff;
-        border-radius: 16px;
-        overflow: hidden;
-        border: 1px solid var(--line);
-    }
-
-    [data-testid="stAlert"] {
-        border-radius: 14px;
-    }
-
-    hr {
-        border: none;
-        border-top: 1px solid var(--line);
-        margin: 1.2rem 0 1.4rem 0;
-    }
-    </style>
+</style>
     """, unsafe_allow_html=True)
-
+    
     # 检查Supabase连接状态
     with st.sidebar:
         if HAS_SUPABASE:
@@ -2454,34 +2232,6 @@ def render_reset_password(analyzer):
 
 
 
-def _open_card(extra_class: str = "soft-card"):
-    st.markdown(f"<div class='{extra_class}'>", unsafe_allow_html=True)
-
-
-def _close_card():
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-def _matplotlib_style(ax, title: str | None = None, xlabel: str | None = None, ylabel: str | None = None):
-    try:
-        ax.set_facecolor("white")
-        ax.grid(True, alpha=0.18, linestyle="--", linewidth=0.8)
-        for side in ["top", "right"]:
-            ax.spines[side].set_visible(False)
-        for side in ["left", "bottom"]:
-            ax.spines[side].set_color("#d9e2ef")
-            ax.spines[side].set_linewidth(1.0)
-        ax.tick_params(colors="#475467", labelsize=10)
-        if title is not None:
-            ax.set_title(title, fontsize=14, fontweight="bold", color="#172033")
-        if xlabel is not None:
-            ax.set_xlabel(xlabel, fontsize=11, color="#344054")
-        if ylabel is not None:
-            ax.set_ylabel(ylabel, fontsize=11, color="#344054")
-    except Exception:
-        pass
-
-
 def render_main_app(analyzer):
     """渲染主应用界面"""
     pages_all = [
@@ -2506,24 +2256,19 @@ def render_main_app(analyzer):
         st.markdown("### 导航")
         if st.session_state.current_page not in pages:
             st.session_state.current_page = pages[0]
-        selected = st.radio("页面", pages, index=pages.index(st.session_state.current_page), label_visibility="collapsed")
+        selected = st.radio("页面", pages, index=pages.index(st.session_state.current_page))
         st.session_state.current_page = selected
 
-    user_info = st.session_state.user_info or {}
-    username = user_info.get('username', '用户')
+    st.markdown("<h2 class='main-header'>碳酸锂套保分析系统</h2>", unsafe_allow_html=True)
+    st.markdown("<span class='cloud-badge'>云端版</span>", unsafe_allow_html=True)
 
+    user_info = st.session_state.user_info
     st.markdown(
-        f"""
-        <div class='topbar-wrap'>
-            <div class='topbar-title'>碳酸锂套保分析系统</div>
-            <div class='topbar-row'>
-                <div><span class='cloud-badge'>云端版</span></div>
-                <div>用户：{username} ｜ 云端存储 ｜ {datetime.now().strftime('%Y-%m-%d')}</div>
-            </div>
-        </div>
-        """,
+        f"<p style='text-align:right;color:#6e6e73;'>用户：{user_info['username']} | 云端存储 | "
+        f"{datetime.now().strftime('%Y-%m-%d')}</p>",
         unsafe_allow_html=True
     )
+    st.divider()
 
     if st.session_state.current_page == "首页":
         render_home_page(analyzer)
@@ -2555,51 +2300,61 @@ def render_main_app(analyzer):
 
 def render_home_page(analyzer):
     """渲染首页"""
-    user_info = st.session_state.user_info or {}
-    username = user_info.get("username", "用户")
-
-    st.markdown(
-        f"""
-        <div class='hero-card'>
-            <div class='hero-kicker'>系统首页</div>
-            <div class='hero-title'>欢迎回来，{username}</div>
-            
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-    st.markdown("<div class='section-title'>快速开始</div>", unsafe_allow_html=True)
+    st.markdown("<h1>系统首页</h1>", unsafe_allow_html=True)
     
+    # 欢迎信息
+    user_info = st.session_state.user_info
+    st.markdown(f"### 欢迎回来，{user_info['username']}！")
+    
+    # 快速开始卡片
 
+    st.markdown("### 快速开始")
+    
     col1, col2, col3 = st.columns(3)
-
-    with col1:
-        _open_card("quick-card")
-        st.markdown("<div class='quick-card-title'>套保计算</div>", unsafe_allow_html=True)
-        st.markdown("<div class='quick-card-desc'>基于当前市场价格，计算最优套保方案。</div>", unsafe_allow_html=True)
-        st.button("开始计算", key="home_calc", use_container_width=True, type="primary", on_click=lambda: st.session_state.update({"current_page": "套保计算"}))
-        _close_card()
-
-    with col2:
-        _open_card("quick-card")
-        st.markdown("<div class='quick-card-title'>价格行情</div>", unsafe_allow_html=True)
-        st.markdown("<div class='quick-card-desc'>查看碳酸锂期货实时价格走势。</div>", unsafe_allow_html=True)
-        st.button("查看行情", key="home_price", use_container_width=True, on_click=lambda: st.session_state.update({"current_page": "价格行情"}))
-        _close_card()
-
-    with col3:
-        _open_card("quick-card")
-        st.markdown("<div class='quick-card-title'>分析历史</div>", unsafe_allow_html=True)
-        st.markdown("<div class='quick-card-desc'>查看您的历史分析记录。</div>", unsafe_allow_html=True)
-        st.button("查看历史", key="home_history", use_container_width=True, on_click=lambda: st.session_state.update({"current_page": "分析历史"}))
-        _close_card()
-
-    if st.session_state.get("current_page") != "首页":
+    
+    
+with col1:
+    st.markdown("""
+    <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;">
+    <h3>套保计算</h3>
+    <p style="color:#6e6e73;">基于当前市场价格，计算最优套保方案</p>
+    </div>
+    """,unsafe_allow_html=True)
+    if st.button("开始计算", key="home_calc", use_container_width=True):
+        st.session_state.current_page = "套保计算"
         st.rerun()
 
-    st.markdown("<div class='section-title'>系统功能</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-subtle'>内容不做扩充，仅以更清晰的分组展示原有说明。</div>", unsafe_allow_html=True)
+    
+    
+with col2:
+    st.markdown("""
+    <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;">
+    <h3>价格行情</h3>
+    <p style="color:#6e6e73;">查看碳酸锂期货实时价格走势</p>
+    </div>
+    """,unsafe_allow_html=True)
+    if st.button("查看行情", key="home_price", use_container_width=True):
+        st.session_state.current_page = "价格行情"
+        st.rerun()
+
+    
+    
+with col3:
+    st.markdown("""
+    <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;">
+    <h3>分析历史</h3>
+    <p style="color:#6e6e73;">查看您的历史分析记录</p>
+    </div>
+    """,unsafe_allow_html=True)
+    if st.button("查看历史", key="home_history", use_container_width=True):
+        st.session_state.current_page = "分析历史"
+        st.rerun()
+
+    
+    # 系统功能介绍
+
+    st.markdown("### 系统功能")
+    
 
     with st.expander("套保计算功能", expanded=True):
         st.markdown("""
@@ -2608,31 +2363,32 @@ def render_home_page(analyzer):
         2. **情景模拟**：价格变动±50%到+100%的盈亏分析
         3. **保证金计算**：自动计算期货交易所需保证金
         4. **风险提示**：根据套保比例提供风险建议
-
+        
         **计算参数**：
         - 存货成本价：0-500,000元/吨
         - 存货数量：0-10,000吨
         - 套保比例：0%-100%
         - 保证金比例：默认15%（可配置）
         """)
-
+    
     with st.expander("价格行情功能"):
         st.markdown("""
         **实时数据**：
         - 合约：LC0主力合约及月合约
         - 频率：日度数据，自动更新
-
+        
         **分析图表**：
         - 价格走势图
         - 移动平均线
         - 关键点标注
         - 统计信息
-
+        
         **数据管理**：
         - 云端缓存30分钟
         - 手动刷新功能
         - 多周期查看
         """)
+    
 
     with st.expander("云端功能"):
         st.markdown("""
@@ -2640,19 +2396,19 @@ def render_home_page(analyzer):
         - 用户数据安全存储在Supabase云端
         - 分析历史永久保存
         - 多设备同步访问
-
+        
         **用户管理**：
         - 注册/登录/注销
         - 密码找回（邮箱验证）
         - 个性化设置
         - 数据隐私保护
-
+        
         **安全特性**：
         - 密码bcrypt加密
         - HTTPS安全传输
         - 数据访问控制
         """)
-
+    
     with st.expander("新增功能模块"):
         st.markdown("""
         - 价差走势与价格指数展示
@@ -2661,23 +2417,27 @@ def render_home_page(analyzer):
         - 多情景分析与对比表格
         - 分析报告汇总输出
         """)
-
+    
+    # 技术架构
+    
+    
+    # 侧边栏显示实时价格
     with st.sidebar:
         st.markdown("### 实时价格")
         try:
             price_data = analyzer.fetch_real_time_data(force_refresh=st.session_state.force_refresh)
             if st.session_state.force_refresh:
                 st.session_state.force_refresh = False
-
+            
             if not price_data.empty:
                 latest_price = price_data['收盘价'].iloc[-1]
                 latest_date = price_data['日期'].iloc[-1]
-
+                
                 if '涨跌幅' in price_data.columns:
                     price_change = price_data['涨跌幅'].iloc[-1]
                 else:
                     price_change = 0
-
+                
                 delta_color = "normal" if price_change >= 0 else "inverse"
                 st.metric(
                     label="碳酸锂期货",
@@ -2686,9 +2446,8 @@ def render_home_page(analyzer):
                     delta_color=delta_color
                 )
                 st.caption(f"更新时间：{latest_date.strftime('%Y-%m-%d')}")
-        except Exception:
+        except:
             st.warning("无法获取实时价格")
-
 def render_hedge_page(analyzer):
     """渲染套保计算页面"""
     st.markdown("<h1>套保计算器</h1>", unsafe_allow_html=True)
@@ -3036,7 +2795,8 @@ def render_hedge_page(analyzer):
             ax_small.plot(recent_data['日期'], recent_data['收盘价'], 'b-', linewidth=1.5)
             ax_small.fill_between(recent_data['日期'], recent_data['收盘价'].min(), 
                                  recent_data['收盘价'], alpha=0.1, color='blue')
-            _matplotlib_style(ax_small, '30日价格走势', None, None)
+            ax_small.set_title('30日价格走势', fontsize=10)
+            ax_small.grid(True, alpha=0.3)
             plt.xticks(rotation=45, fontsize=8)
             plt.tight_layout()
             st.pyplot(fig_small)
@@ -3278,8 +3038,11 @@ def render_price_page(analyzer):
         ma60 = display_data["收盘价"].rolling(window=60).mean()
         ax_main.plot(display_data["日期"], ma60, linestyle="--", linewidth=1.5, label="60日均线")
 
-    _matplotlib_style(ax_main, f"{symbol} {period}价格走势", "日期", "价格 (元/吨)")
-    ax_main.legend(fontsize=10, frameon=False)
+    ax_main.set_title(f"{symbol} {period}价格走势", fontsize=16, fontweight="bold")
+    ax_main.set_xlabel("日期", fontsize=12)
+    ax_main.set_ylabel("价格 (元/吨)", fontsize=12)
+    ax_main.grid(True, alpha=0.3)
+    ax_main.legend(fontsize=10)
     ax_main.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, pos: f"{x:,.0f}"))
     plt.xticks(rotation=45)
     plt.tight_layout()
@@ -3586,7 +3349,10 @@ def render_basis_page(analyzer):
     fig, ax = plt.subplots(figsize=(12, 6))
     ax.plot(display_data["日期"], display_data["价差"], linewidth=2.2)
     ax.axhline(0, linestyle="--", linewidth=1)
-    _matplotlib_style(ax, f"价差走势（{active_basis_label}）", "日期", "价差 (元/吨)")
+    ax.set_title(f"价差走势（{active_basis_label}）", fontsize=15, fontweight="bold")
+    ax.set_xlabel("日期")
+    ax.set_ylabel("价差 (元/吨)")
+    ax.grid(True, alpha=0.3, linestyle="--")
     plt.xticks(rotation=30)
     plt.tight_layout()
     st.pyplot(fig)
@@ -3688,40 +3454,18 @@ def render_inventory_page(analyzer):
 
     with tab1:
         col1, col2 = st.columns(2)
-        with col1:
-            date = st.date_input("日期", value=datetime.now().date())
-            txn_type = st.selectbox("类型", ["入库", "出库"])
-            grade = st.selectbox("品级", ["电池级", "工业级", "未分类"])
-            warehouse = st.text_input("仓库/地点", value="默认仓")
-            qty = st.number_input("数量 (吨)", min_value=0.0, value=10.0, step=1.0)
-        with col2:
-            unit_cost = st.number_input(
-                "单吨成本 (元/吨)",
-                min_value=0.0,
-                value=100000.0,
-                step=1000.0,
-                help="入库建议填写真实采购/生产成本；出库可不填（系统按移动加权均价核算）。"
-            )
-            notes = st.text_area("备注", value="", height=120)
+        
+with col1:
+    st.markdown("""
+    <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;">
+    <h3>套保计算</h3>
+    <p style="color:#6e6e73;">基于当前市场价格，计算最优套保方案</p>
+    </div>
+    """,unsafe_allow_html=True)
+    if st.button("开始计算", key="home_calc", use_container_width=True):
+        st.session_state.current_page = "套保计算"
+        st.rerun()
 
-        # 企业真实数据确认（用于避免触发“模拟数据”红字规则）
-        confirm_real = st.checkbox("我确认上述成本为企业真实采购/生产成本（用于内部核算）", value=False)
-
-        if st.button("保存库存记录", use_container_width=True):
-            txn = {
-                "date": str(date),
-                "txn_type": txn_type,
-                "grade": grade,
-                "warehouse": warehouse.strip() or "默认仓",
-                "qty_ton": float(qty),
-                "unit_cost": float(unit_cost),
-                "notes": notes.strip(),
-                "is_enterprise_real": bool(confirm_real),
-            }
-            ok = analyzer.save_inventory_txn(user_id, txn)
-            if ok:
-                st.success("已保存。")
-                st.rerun()
             else:
                 st.error("保存失败，请稍后重试。")
 
@@ -3827,39 +3571,18 @@ def render_profit_page(analyzer):
 
     with tab1:
         col1, col2 = st.columns(2)
-        with col1:
-            date = st.date_input("销售日期", value=datetime.now().date(), key="sale_date")
-            grade = st.selectbox("品级", ["电池级", "工业级", "未分类"], key="sale_grade")
-            qty = st.number_input("销售数量 (吨)", min_value=0.0, value=10.0, step=1.0, key="sale_qty")
-            unit_price = st.number_input("销售单价 (元/吨)", min_value=0.0, value=120000.0, step=1000.0, key="sale_unit_price")
-        with col2:
-            customer = st.text_input("客户（可选）", value="", key="sale_customer")
-            override_cost = st.number_input(
-                "单吨成本覆盖值（可选）",
-                min_value=0.0,
-                value=0.0,
-                step=1000.0,
-                help="如该笔业务有明确结算成本/合同成本，可填写；否则系统将按库存移动加权均价核算。"
-            )
-            notes = st.text_area("备注", value="", height=120, key="sale_notes")
+        
+with col1:
+    st.markdown("""
+    <div style="background:white;padding:22px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,0.05);text-align:center;">
+    <h3>套保计算</h3>
+    <p style="color:#6e6e73;">基于当前市场价格，计算最优套保方案</p>
+    </div>
+    """,unsafe_allow_html=True)
+    if st.button("开始计算", key="home_calc", use_container_width=True):
+        st.session_state.current_page = "套保计算"
+        st.rerun()
 
-        confirm_real = st.checkbox("我确认上述销售单价/成本（如填写）为企业真实业务数据（用于内部核算）", value=False, key="sale_confirm")
-
-        if st.button("保存销售记录", use_container_width=True):
-            txn = {
-                "date": str(date),
-                "grade": grade,
-                "qty_ton": float(qty),
-                "unit_price": float(unit_price),
-                "customer": customer.strip(),
-                "override_cost": float(override_cost),
-                "notes": notes.strip(),
-                "is_enterprise_real": bool(confirm_real),
-            }
-            ok = analyzer.save_sales_txn(user_id, txn)
-            if ok:
-                st.success("已保存。")
-                st.rerun()
             else:
                 st.error("保存失败，请稍后重试。")
 
@@ -3971,8 +3694,11 @@ def render_option_page(analyzer):
         ax.plot(scenario_prices, no_insurance, color="#ff3b30", linewidth=2, label="不买保险")
         ax.plot(scenario_prices, futures_locked, color="#34c759", linewidth=2, label="买期货")
         ax.plot(scenario_prices, option_cost, color="#0a84ff", linewidth=2, label="买期权")
-        _matplotlib_style(ax, "三种情景对比", "未来价格 (元/吨)", ylabel)
-        ax.legend(frameon=False)
+        ax.set_title("三种情景对比", fontsize=14, fontweight="bold")
+        ax.set_xlabel("未来价格 (元/吨)")
+        ax.set_ylabel(ylabel)
+        ax.grid(True, alpha=0.3, linestyle="--")
+        ax.legend()
         plt.tight_layout()
         st.pyplot(fig)
 
@@ -4045,7 +3771,7 @@ def render_exposure_page(analyzer):
         components = [future_purchase, inventory, locked_sales]
         labels = ["未来采购", "现有库存", "已锁定"]
         ax.pie(components, labels=labels, autopct="%1.1f%%", startangle=90)
-        ax.set_title("敞口构成", fontsize=13, fontweight="bold", color="#172033")
+        ax.set_title("敞口构成", fontsize=13, fontweight="bold")
         st.pyplot(fig)
 
         st.markdown("#### 策略建议")
