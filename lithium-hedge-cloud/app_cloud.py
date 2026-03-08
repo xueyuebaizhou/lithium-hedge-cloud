@@ -2228,24 +2228,6 @@ def main():
         font-weight: 600;
     }
 
-    [data-testid="stMetricValue"] {
-        overflow: visible !important;
-    }
-
-    [data-testid="stMetricValue"] > div {
-        width: 100% !important;
-        overflow: visible !important;
-    }
-
-    [data-testid="stMetricValue"] div {
-        font-size: clamp(1.9rem, 2.2vw, 3rem) !important;
-        line-height: 1.08 !important;
-        white-space: nowrap !important;
-        overflow: visible !important;
-        text-overflow: clip !important;
-        letter-spacing: -0.02em;
-    }
-
     [data-testid="stExpander"] {
         border: 1px solid var(--line) !important;
         border-radius: 16px !important;
@@ -2581,14 +2563,14 @@ def render_home_page(analyzer):
         <div class='hero-card'>
             <div class='hero-kicker'>系统首页</div>
             <div class='hero-title'>欢迎回来，{username}</div>
-            <p class='hero-desc'>当前页面仅做视觉优化，保留原有功能与信息结构；通过更统一的排版、卡片层级和配色提升首页整体质感。</p>
+            
         </div>
         """,
         unsafe_allow_html=True
     )
 
     st.markdown("<div class='section-title'>快速开始</div>", unsafe_allow_html=True)
-    st.markdown("<div class='section-subtle'>保留原有入口，只对视觉层级、留白和按钮样式进行统一。</div>", unsafe_allow_html=True)
+    
 
     col1, col2, col3 = st.columns(3)
 
@@ -2679,23 +2661,6 @@ def render_home_page(analyzer):
         - 多情景分析与对比表格
         - 分析报告汇总输出
         """)
-
-    st.markdown("<div class='section-title'>页面说明</div>", unsafe_allow_html=True)
-    st.markdown(
-        """
-        <div class='info-grid'>
-            <div class='info-card'>
-                <div class='info-card-title'>视觉调整重点</div>
-                <p class='info-card-desc'>统一浅灰背景、白色卡片、圆角边框和标题层级，使首页更接近企业后台风格，同时不改变原有交互路径。</p>
-            </div>
-            <div class='info-card'>
-                <div class='info-card-title'>风格统一范围</div>
-                <p class='info-card-desc'>除首页外，其余栏目共享相同的全局配色、按钮、边框和展开面板样式，保持界面整体一致。</p>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
 
     with st.sidebar:
         st.markdown("### 实时价格")
