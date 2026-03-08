@@ -4175,29 +4175,49 @@ def render_scenario_page(analyzer):
             st.error(f"历史情景提取失败：{e}")
 
 def render_report_page(analyzer):
-    """渲染分析报告页面"""
+    """渲染分析报告页面（v45 稳定版）"""
     st.markdown("<h1>分析报告</h1>", unsafe_allow_html=True)
 
     basis_data = st.session_state.get("basis_data")
     if not basis_data:
         price_data = analyzer.fetch_real_time_data()
-        latest_futures = float(price_data["收盘价"].iloc[-1]) if not price_data.empty else 0
+
+        try:
+            if price_data is not None and not price_data.empty:
+                if "日期" in price_data.columns:
+                    update_time = pd.to_datetime(price_data["日期"].iloc[-1])
+                elif "date" in price_data.columns:
+                    update_time = pd.to_datetime(price_data["date"].iloc[-1])
+                else:
+                    update_time = datetime.now()
+            else:
+                update_time = datetime.now()
+        except Exception:
+            update_time = datetime.now()
+
+        try:
+            latest_futures = float(price_data["收盘价"].iloc[-1]) if (price_data is not None and not price_data.empty and "收盘价" in price_data.columns) else 0.0
+        except Exception:
+            latest_futures = 0.0
+
         # 现货参考价：优先使用内置现货表（静态），若缺失则要求用户明确输入并红字提示
         s_price, s_date, s_ok = get_spot_price_on_or_before(pd.to_datetime(update_time))
-        if s_ok:
+        if s_ok and s_price is not None:
             spot_price = float(s_price)
             ref_source = "内置现货表（用户提供历史数据，静态）"
         else:
             st.markdown("<span style='color:red;font-weight:700'>当前为模拟数据，禁止用于对外报告（未找到内置现货价，请手动输入并确认来源）</span>", unsafe_allow_html=True)
             spot_price = st.number_input("现货参考价 (元/吨) - 手动输入", min_value=0.0, value=0.0, step=500.0)
             ref_source = "手动输入（需用户确认真实来源）"
+
+        basis_value = float(latest_futures - spot_price) if spot_price is not None else 0.0
         basis_data = {
-            "spot_price": spot_price,
-            "ref_spot_price": spot_price,
+            "spot_price": float(spot_price),
+            "ref_spot_price": float(spot_price),
             "ref_spot_source": ref_source,
-            "analysis_spot_price": spot_price,
-            "futures_price": latest_futures,
-            "basis": basis_value,
+            "analysis_spot_price": float(spot_price),
+            "futures_price": float(latest_futures),
+            "basis": float(basis_value),
             "update_time": update_time
         }
 
@@ -4784,5 +4804,4 @@ if __name__ == "__main__":
         st.error(f"应用程序运行出错: {str(e)}")
         st.code(traceback.format_exc())
         st.info("请检查：\n1. 网络连接\n2. 环境变量配置\n3. 依赖包安装")
-
 
