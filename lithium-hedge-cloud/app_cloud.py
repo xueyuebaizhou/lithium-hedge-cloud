@@ -2228,6 +2228,24 @@ def main():
         font-weight: 600;
     }
 
+    [data-testid="stMetricValue"] {
+        overflow: visible !important;
+    }
+
+    [data-testid="stMetricValue"] > div {
+        width: 100% !important;
+        overflow: visible !important;
+    }
+
+    [data-testid="stMetricValue"] div {
+        font-size: clamp(1.9rem, 2.2vw, 3rem) !important;
+        line-height: 1.08 !important;
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        letter-spacing: -0.02em;
+    }
+
     [data-testid="stExpander"] {
         border: 1px solid var(--line) !important;
         border-radius: 16px !important;
