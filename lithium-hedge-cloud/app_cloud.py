@@ -2575,25 +2575,25 @@ def render_home_page(analyzer):
     col1, col2, col3 = st.columns(3)
 
     with col1:
-        _open_card("quick-card")
+
         st.markdown("<div class='quick-card-title'>套保计算</div>", unsafe_allow_html=True)
         st.markdown("<div class='quick-card-desc'>基于当前市场价格，计算最优套保方案。</div>", unsafe_allow_html=True)
         st.button("开始计算", key="home_calc", use_container_width=True, type="primary", on_click=lambda: st.session_state.update({"current_page": "套保计算"}))
-        _close_card()
+
 
     with col2:
-        _open_card("quick-card")
+
         st.markdown("<div class='quick-card-title'>价格行情</div>", unsafe_allow_html=True)
         st.markdown("<div class='quick-card-desc'>查看碳酸锂期货实时价格走势。</div>", unsafe_allow_html=True)
         st.button("查看行情", key="home_price", use_container_width=True, on_click=lambda: st.session_state.update({"current_page": "价格行情"}))
-        _close_card()
+
 
     with col3:
-        _open_card("quick-card")
+
         st.markdown("<div class='quick-card-title'>分析历史</div>", unsafe_allow_html=True)
         st.markdown("<div class='quick-card-desc'>查看您的历史分析记录。</div>", unsafe_allow_html=True)
         st.button("查看历史", key="home_history", use_container_width=True, on_click=lambda: st.session_state.update({"current_page": "分析历史"}))
-        _close_card()
+
 
     if st.session_state.get("current_page") != "首页":
         st.rerun()
@@ -4784,4 +4784,5 @@ if __name__ == "__main__":
         st.error(f"应用程序运行出错: {str(e)}")
         st.code(traceback.format_exc())
         st.info("请检查：\n1. 网络连接\n2. 环境变量配置\n3. 依赖包安装")
+
 
