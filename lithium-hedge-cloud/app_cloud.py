@@ -1975,9 +1975,8 @@ def main():
     # 自定义CSS
     st.markdown("""
     <style>
-    /* 隐藏 Streamlit 默认标识与工具栏 */
+    /* 隐藏 Streamlit 默认标识与工具栏（保留 header，避免侧边栏收起后无法恢复） */
     #MainMenu {visibility: hidden !important;}
-    header {visibility: hidden !important;}
     footer {visibility: hidden !important;}
     .stDeployButton {display: none !important;}
     [data-testid="stToolbar"] {display: none !important;}
@@ -1988,6 +1987,16 @@ def main():
     [data-testid="stAppDeployButton"] {display: none !important;}
     button[kind="header"] {display: none !important;}
 
+    /* 禁止侧边栏折叠，避免“点隐藏后无法再显示” */
+    [data-testid="collapsedControl"] {display: none !important;}
+    [data-testid="stSidebarCollapsedControl"] {display: none !important;}
+    [data-testid="stSidebarCollapseButton"] {display: none !important;}
+    section[data-testid="stSidebar"] {
+        min-width: 17rem !important;
+        max-width: 17rem !important;
+        transform: none !important;
+    }
+
     /* 强制隐藏 Hosted with Streamlit 红条 / 云部署徽标 */
     a[href*="streamlit.io"],
     a[href*="share.streamlit.io"],
@@ -1997,19 +2006,30 @@ def main():
     [href*="streamlit.app"],
     [title*="Hosted with Streamlit"],
     [aria-label*="Hosted with Streamlit"],
+    [aria-label*="Open app menu"],
     img[alt*="Streamlit"],
     img[alt*="streamlit"] {
         display: none !important;
         visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
     }
 
     div:has(> a[href*="streamlit.io"]),
     div:has(> a[href*="share.streamlit.io"]),
     div:has(> a[href*="streamlit.app"]),
     div:has(img[alt*="Streamlit"]),
-    div:has(img[alt*="streamlit"]) {
+    div:has(img[alt*="streamlit"]),
+    div:has([title*="Hosted with Streamlit"]),
+    div:has([aria-label*="Hosted with Streamlit"]) {
         display: none !important;
         visibility: hidden !important;
+        width: 0 !important;
+        height: 0 !important;
+        opacity: 0 !important;
+        pointer-events: none !important;
     }
     :root {
         --bg: #f5f7fb;
