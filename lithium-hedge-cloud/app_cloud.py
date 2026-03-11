@@ -1985,7 +1985,32 @@ def main():
     [data-testid="stStatusWidget"] {display: none !important;}
     [data-testid="stHeaderActionElements"] {display: none !important;}
     [data-testid="stMainMenu"] {display: none !important;}
+    [data-testid="stAppDeployButton"] {display: none !important;}
     button[kind="header"] {display: none !important;}
+
+    /* 强制隐藏 Hosted with Streamlit 红条 / 云部署徽标 */
+    a[href*="streamlit.io"],
+    a[href*="share.streamlit.io"],
+    a[href*="streamlit.app"],
+    [href*="streamlit.io"],
+    [href*="share.streamlit.io"],
+    [href*="streamlit.app"],
+    [title*="Hosted with Streamlit"],
+    [aria-label*="Hosted with Streamlit"],
+    img[alt*="Streamlit"],
+    img[alt*="streamlit"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+
+    div:has(> a[href*="streamlit.io"]),
+    div:has(> a[href*="share.streamlit.io"]),
+    div:has(> a[href*="streamlit.app"]),
+    div:has(img[alt*="Streamlit"]),
+    div:has(img[alt*="streamlit"]) {
+        display: none !important;
+        visibility: hidden !important;
+    }
     :root {
         --bg: #f5f7fb;
         --card: #ffffff;
