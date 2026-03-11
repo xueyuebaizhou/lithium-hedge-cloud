@@ -2315,22 +2315,7 @@ def main():
         border-top: 1px solid var(--line);
         margin: 1.2rem 0 1.4rem 0;
     }
-
-    /* 右下角遮罩：覆盖 Streamlit 浮动标识 */
-    .streamlit-bottom-right-mask {
-        position: fixed;
-        right: 0.75rem;
-        bottom: 0.75rem;
-        width: 90px;
-        height: 90px;
-        background: var(--bg);
-        border-radius: 18px;
-        z-index: 999999 !important;
-        pointer-events: none;
-        box-shadow: none;
-    }
     </style>
-    <div class="streamlit-bottom-right-mask"></div>
     """, unsafe_allow_html=True)
 
     # 检查Supabase连接状态（v46：隐藏侧边栏状态提示，不影响功能）
