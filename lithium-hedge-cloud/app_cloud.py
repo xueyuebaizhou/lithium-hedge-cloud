@@ -1975,6 +1975,17 @@ def main():
     # 自定义CSS
     st.markdown("""
     <style>
+    /* 隐藏 Streamlit 默认标识与工具栏 */
+    #MainMenu {visibility: hidden !important;}
+    header {visibility: hidden !important;}
+    footer {visibility: hidden !important;}
+    .stDeployButton {display: none !important;}
+    [data-testid="stToolbar"] {display: none !important;}
+    [data-testid="stDecoration"] {display: none !important;}
+    [data-testid="stStatusWidget"] {display: none !important;}
+    [data-testid="stHeaderActionElements"] {display: none !important;}
+    [data-testid="stMainMenu"] {display: none !important;}
+    button[kind="header"] {display: none !important;}
     :root {
         --bg: #f5f7fb;
         --card: #ffffff;
@@ -2262,14 +2273,8 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    # 检查Supabase连接状态
-    with st.sidebar:
-        if HAS_SUPABASE:
-            st.success("Supabase连接正常")
-        else:
-            st.error("Supabase未配置")
-            st.info("请设置环境变量：SUPABASE_URL和SUPABASE_KEY")
-            st.info("当前使用本地模拟模式")
+    # 检查Supabase连接状态（v46：隐藏侧边栏状态提示，不影响功能）
+    pass
     
     # 登录/注册页面
     if not st.session_state.authenticated:
@@ -4804,4 +4809,3 @@ if __name__ == "__main__":
         st.error(f"应用程序运行出错: {str(e)}")
         st.code(traceback.format_exc())
         st.info("请检查：\n1. 网络连接\n2. 环境变量配置\n3. 依赖包安装")
-
