@@ -30,27 +30,69 @@ class SupabaseManager:
     # ==================== 用户管理 ====================
     
     def create_user(self, username: str, password: str, email: str) -> Dict[str, Any]:
-        """创建新用户"""
+        """创建新用户。
+
+        说明：
+        - 先在 Supabase Auth 中创建邮箱账号，确保后续可使用邮箱 OTP 登录。
+        - 再在业务 users 表中创建档案记录，保留原有系统所需字段。
+        """
         try:
+            username = (username or "").strip()
+            email = (email or "").strip().lower()
+            password = password or ""
+
+            if len(username) < 3:
+                return {"success": False, "message": "用户名至少3个字符"}
+            if "@" not in email or "." not in email:
+                return {"success": False, "message": "请输入有效邮箱"}
+            if len(password) < 6:
+                return {"success": False, "message": "密码长度至少6位"}
+
             # 检查用户名是否已存在
             existing_user = self.get_user_by_username(username)
             if existing_user:
                 return {"success": False, "message": "用户名已存在"}
-            
+
             # 检查邮箱是否已存在
             existing_email = self.get_user_by_email(email)
             if existing_email:
                 return {"success": False, "message": "邮箱已被注册"}
-            
-            # 哈希密码
+
+            auth_user = None
+            auth_user_id = None
+
+            # 先创建 Auth 用户，便于后续邮箱 OTP / 重置密码等能力直接复用 Supabase
+            try:
+                auth_resp = self.client.auth.sign_up({
+                    "email": email,
+                    "password": password,
+                    "options": {
+                        "data": {
+                            "username": username
+                        }
+                    }
+                })
+                auth_user = getattr(auth_resp, "user", None)
+                if auth_user is None and hasattr(auth_resp, "data"):
+                    data = getattr(auth_resp, "data")
+                    if isinstance(data, dict):
+                        auth_user = data.get("user")
+                    else:
+                        auth_user = getattr(data, "user", None)
+                if auth_user is not None:
+                    auth_user_id = getattr(auth_user, "id", None)
+                    if auth_user_id is None and isinstance(auth_user, dict):
+                        auth_user_id = auth_user.get("id")
+            except Exception as e:
+                return {"success": False, "message": f"Auth 注册失败: {str(e)}"}
+
+            # 哈希密码并创建业务档案
             hashed_password = self._hash_password(password)
-            
-            # 生成用户ID
-            user_id = f"user_{secrets.token_hex(12)}"
-            
-            # 插入用户数据
+            user_id = auth_user_id or f"user_{secrets.token_hex(12)}"
+
             user_data = {
                 "user_id": user_id,
+                "auth_user_id": auth_user_id,
                 "username": username,
                 "password_hash": hashed_password,
                 "email": email,
@@ -59,72 +101,74 @@ class SupabaseManager:
                 "is_active": True,
                 "subscription_tier": "free"
             }
-            
+
             response = self.client.table("users").insert(user_data).execute()
-            
+
             if response.data:
-                # 创建默认用户设置
                 self.create_user_settings(user_id)
                 return {
-                    "success": True, 
+                    "success": True,
                     "message": "注册成功",
                     "user_id": user_id,
+                    "auth_user_id": auth_user_id,
                     "data": response.data[0]
                 }
-            else:
-                return {"success": False, "message": "注册失败"}
-                
+            return {"success": False, "message": "注册失败：业务用户档案写入失败"}
+
         except Exception as e:
             print(f"注册错误: {str(e)}")
             return {"success": False, "message": f"注册错误: {str(e)}"}
-    
+
     def authenticate_user(self, username: str, password: str) -> Dict[str, Any]:
-        """用户认证"""
+        """用户认证，支持用户名或邮箱登录。"""
         try:
-            # 获取用户
-            response = self.client.table("users")\
-                .select("*")\
-                .eq("username", username)\
-                .eq("is_active", True)\
-                .execute()
-            
+            username = (username or "").strip()
+            password = password or ""
+
+            response = self.client.table("users")                .select("*")                .eq("is_active", True)                .execute()
+
             if not response.data:
                 return {"success": False, "message": "用户不存在"}
-            
-            user = response.data[0]
-            
-            # 验证密码
+
+            user = None
+            username_lower = username.lower()
+            for row in response.data:
+                row_username = str(row.get("username") or "").strip()
+                row_email = str(row.get("email") or "").strip().lower()
+                if row_username == username or row_email == username_lower:
+                    user = row
+                    break
+
+            if not user:
+                return {"success": False, "message": "用户不存在"}
+
             if not self._verify_password(password, user["password_hash"]):
                 return {"success": False, "message": "密码错误"}
-            
-            # 更新最后登录时间
+
             update_data = {
                 "last_login": datetime.utcnow().isoformat() + "Z"
             }
-            
-            self.client.table("users")\
-                .update(update_data)\
-                .eq("user_id", user["user_id"])\
-                .execute()
-            
-            # 获取用户设置
+
+            self.client.table("users")                .update(update_data)                .eq("user_id", user["user_id"])                .execute()
+
             settings = self.get_user_settings(user["user_id"])
-            
+
             return {
                 "success": True,
                 "message": "登录成功",
                 "user_id": user["user_id"],
+                "auth_user_id": user.get("auth_user_id"),
                 "username": user["username"],
                 "email": user["email"],
                 "created_at": user["created_at"],
                 "last_login": user["last_login"],
                 "settings": settings
             }
-            
+
         except Exception as e:
             print(f"登录错误: {str(e)}")
             return {"success": False, "message": f"登录错误: {str(e)}"}
-    
+
     def get_user_by_username(self, username: str) -> Optional[Dict]:
         """根据用户名获取用户"""
         try:
@@ -292,6 +336,96 @@ class SupabaseManager:
             print(f"验证验证码错误: {e}")
             return False
     
+    def send_email_login_code(self, email: str) -> Dict[str, Any]:
+        """发送邮箱 OTP 登录验证码。"""
+        try:
+            email = (email or "").strip().lower()
+            if not email:
+                return {"success": False, "message": "请输入邮箱"}
+
+            user = self.get_user_by_email(email)
+            if not user:
+                return {"success": False, "message": "该邮箱未注册，无法进行验证码登录"}
+
+            self.client.auth.sign_in_with_otp({
+                "email": email,
+                "options": {
+                    "should_create_user": False
+                }
+            })
+            return {"success": True, "message": "验证码已发送，请查收邮箱"}
+        except Exception as e:
+            print(f"发送邮箱验证码失败: {e}")
+            return {"success": False, "message": f"发送邮箱验证码失败: {str(e)}"}
+
+    def verify_email_login_code(self, email: str, code: str) -> Dict[str, Any]:
+        """校验邮箱 OTP 并返回系统可直接使用的用户信息。"""
+        try:
+            email = (email or "").strip().lower()
+            code = (code or "").strip()
+            if not email:
+                return {"success": False, "message": "请输入邮箱"}
+            if not code:
+                return {"success": False, "message": "请输入验证码"}
+
+            auth_result = None
+            verify_errors = []
+            for otp_type in ["email", "magiclink"]:
+                try:
+                    auth_result = self.client.auth.verify_otp({
+                        "email": email,
+                        "token": code,
+                        "type": otp_type
+                    })
+                    break
+                except Exception as e:
+                    verify_errors.append(str(e))
+
+            if auth_result is None:
+                msg = verify_errors[-1] if verify_errors else "验证码校验失败"
+                return {"success": False, "message": f"验证码校验失败: {msg}"}
+
+            user = self.get_user_by_email(email)
+            auth_user = getattr(auth_result, "user", None)
+            auth_user_id = None
+            if auth_user is not None:
+                auth_user_id = getattr(auth_user, "id", None)
+                if auth_user_id is None and isinstance(auth_user, dict):
+                    auth_user_id = auth_user.get("id")
+
+            if user:
+                self.client.table("users")                    .update({
+                        "last_login": datetime.utcnow().isoformat() + "Z",
+                        "auth_user_id": user.get("auth_user_id") or auth_user_id
+                    })                    .eq("user_id", user["user_id"])                    .execute()
+
+                settings = self.get_user_settings(user["user_id"])
+                return {
+                    "success": True,
+                    "message": "登录成功",
+                    "user_id": user["user_id"],
+                    "auth_user_id": user.get("auth_user_id") or auth_user_id,
+                    "username": user.get("username") or (email.split("@", 1)[0]),
+                    "email": user.get("email") or email,
+                    "settings": settings,
+                    "auth_result": auth_result,
+                }
+
+            # Auth 登录成功但业务 users 表中没有档案时，仍返回可用最小信息，避免 UI 崩溃
+            return {
+                "success": True,
+                "message": "登录成功，但未找到业务用户档案",
+                "user_id": auth_user_id or f"user::{email.split('@', 1)[0]}",
+                "auth_user_id": auth_user_id,
+                "username": email.split("@", 1)[0],
+                "email": email,
+                "settings": {},
+                "auth_result": auth_result,
+            }
+        except Exception as e:
+            print(f"邮箱验证码登录失败: {e}")
+            return {"success": False, "message": f"邮箱验证码登录失败: {str(e)}"}
+
     # ==================== 数据分析缓存 ====================
     
     def save_price_data(self, symbol: str, data: pd.DataFrame, cache_minutes: int = 30) -> bool:
