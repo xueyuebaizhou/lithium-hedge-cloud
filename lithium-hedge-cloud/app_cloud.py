@@ -765,7 +765,15 @@ class CloudUserAuth:
             if len(ret) == 1:
                 return bool(ret[0]), None
             return default_ok, None
-        # Some helpers may return dict/string directly
+        if isinstance(ret, dict):
+            if "success" in ret:
+                return bool(ret.get("success")), ret
+            if "ok" in ret:
+                return bool(ret.get("ok")), ret
+            if "error" in ret and ret.get("error"):
+                return False, ret
+            return default_ok, ret
+        # Some helpers may return object/string directly
         return default_ok, ret
 
     def register(self, username: str, password: str, email: str):
