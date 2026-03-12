@@ -873,6 +873,91 @@ class CloudUserAuth:
 
         return False, "后端未提供改密接口"
 
+    def send_email_login_code(self, email: str):
+        """发送邮箱验证码用于免密登录。"""
+        if not self.supabase:
+            return False, "数据库连接失败，请检查配置"
+
+        email = (email or "").strip()
+        if not email or "@" not in email or "." not in email:
+            return False, "请输入有效的邮箱地址"
+
+        for fn_name in [
+            "send_email_login_code",
+            "send_login_code",
+            "send_email_otp",
+            "sign_in_with_otp",
+            "login_with_otp",
+        ]:
+            fn = getattr(self.supabase, fn_name, None)
+            if callable(fn):
+                try:
+                    if fn_name in ["sign_in_with_otp", "login_with_otp"]:
+                        return self._normalize_result(fn({"email": email}), default_ok=True)
+                    return self._normalize_result(fn(email), default_ok=True)
+                except TypeError:
+                    try:
+                        return self._normalize_result(fn(email=email), default_ok=True)
+                    except Exception as e:
+                        return False, f"发送登录验证码失败: {e}"
+                except Exception as e:
+                    return False, f"发送登录验证码失败: {e}"
+
+        auth = getattr(self.supabase, "auth", None)
+        if auth and hasattr(auth, "sign_in_with_otp"):
+            try:
+                return self._normalize_result(auth.sign_in_with_otp({"email": email}), default_ok=True)
+            except Exception as e:
+                return False, f"发送登录验证码失败: {e}"
+
+        return False, "后端未提供邮箱验证码登录接口"
+
+    def login_with_email_code(self, email: str, code: str):
+        """邮箱验证码免密登录。"""
+        if not self.supabase:
+            return False, "数据库连接失败，请检查配置"
+
+        email = (email or "").strip()
+        code = (code or "").strip()
+        if not email or "@" not in email or "." not in email:
+            return False, "请输入有效的邮箱地址"
+        if not code:
+            return False, "请输入邮箱验证码"
+
+        for fn_name in [
+            "login_with_email_code",
+            "verify_email_login_code",
+            "verify_login_code",
+            "verify_email_otp",
+        ]:
+            fn = getattr(self.supabase, fn_name, None)
+            if callable(fn):
+                try:
+                    return self._normalize_result(fn(email, code), default_ok=True)
+                except TypeError:
+                    try:
+                        return self._normalize_result(fn({"email": email, "token": code}), default_ok=True)
+                    except Exception as e:
+                        return False, f"验证码登录失败: {e}"
+                except Exception as e:
+                    return False, f"验证码登录失败: {e}"
+
+        auth = getattr(self.supabase, "auth", None)
+        if auth and hasattr(auth, "verify_otp"):
+            verify_payloads = [
+                {"email": email, "token": code, "type": "email"},
+                {"email": email, "token": code, "type": "magiclink"},
+            ]
+            last_err = None
+            for payload in verify_payloads:
+                try:
+                    return self._normalize_result(auth.verify_otp(payload), default_ok=True)
+                except Exception as e:
+                    last_err = e
+            return False, f"验证码登录失败: {last_err}" if last_err else "验证码登录失败"
+
+        return False, "后端未提供邮箱验证码登录接口"
+
     def generate_reset_code(self, username_or_email: str, email: str | None = None):
         """生成/发送重置码（如有邮件验证）。
 
@@ -999,7 +1084,10 @@ def _extract_user_info_from_login_result(result, username_fallback: str = "") ->
     except Exception:
         info = info or {}
 
-    username = (info.get("username") or username_fallback or "").strip()
+    fallback_name = username_fallback or info.get("email") or ""
+    if isinstance(fallback_name, str) and "@" in fallback_name:
+        fallback_name = fallback_name.split("@", 1)[0]
+    username = (info.get("username") or fallback_name or "").strip()
     raw_uid = info.get("user_id") or info.get("id")
     user_id = raw_uid.strip() if isinstance(raw_uid, str) else raw_uid
     settings = info.get("settings") if isinstance(info.get("settings"), dict) else {}
@@ -2353,37 +2441,74 @@ def render_auth_page(analyzer):
         col_left, col_center, col_right = st.columns([1, 2, 1])
         with col_center:
             st.markdown("### 用户登录")
-            username = st.text_input("用户名", placeholder="请输入用户名", key="login_username")
-            password = st.text_input("密码", type="password", placeholder="请输入密码", key="login_password")
+            login_tab_pwd, login_tab_email = st.tabs(["用户名/密码登录", "邮箱验证码登录"])
 
-            col_btn1, col_btn2 = st.columns(2)
-            with col_btn1:
-                if st.button("登录", type="primary", use_container_width=True):
-                    with st.spinner("正在验证..."):
-                        success, result = analyzer.auth.login(username, password)
-                    if success:
-                        st.session_state.authenticated = True
-                        # result 可能是 dict 或字符串
-                        st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=username)
-                        st.session_state.user_id = st.session_state.user_info.get('user_id')
-                        st.success("登录成功！")
-                        _log("login", {"username": username})
+            with login_tab_pwd:
+                username = st.text_input("用户名", placeholder="请输入用户名", key="login_username")
+                password = st.text_input("密码", type="password", placeholder="请输入密码", key="login_password")
+
+                col_btn1, col_btn2 = st.columns(2)
+                with col_btn1:
+                    if st.button("登录", type="primary", use_container_width=True):
+                        with st.spinner("正在验证..."):
+                            success, result = analyzer.auth.login(username, password)
+                        if success:
+                            st.session_state.authenticated = True
+                            st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=username)
+                            st.session_state.user_id = st.session_state.user_info.get('user_id')
+                            st.success("登录成功！")
+                            _log("login", {"username": username, "mode": "password"})
+                            st.rerun()
+                        else:
+                            msg = result.get("message") if isinstance(result, dict) else str(result)
+                            st.error(msg or "登录失败")
+
+                with col_btn2:
+                    if st.button("忘记密码", use_container_width=True):
+                        st.session_state.show_forgot_password = True
                         st.rerun()
-                    else:
-                        msg = result.get("message") if isinstance(result, dict) else str(result)
-                        st.error(msg or "登录失败")
 
-            with col_btn2:
-                if st.button("忘记密码", use_container_width=True):
-                    st.session_state.show_forgot_password = True
-                    st.rerun()
+            with login_tab_email:
+                email = st.text_input("邮箱", placeholder="请输入注册邮箱", key="email_login_email")
+                email_code = st.text_input("邮箱验证码", placeholder="请输入邮箱验证码", key="email_login_code")
+
+                col_email_btn1, col_email_btn2 = st.columns(2)
+                with col_email_btn1:
+                    if st.button("发送验证码", use_container_width=True, key="send_email_login_code_btn"):
+                        with st.spinner("正在发送验证码..."):
+                            success, result = analyzer.auth.send_email_login_code(email)
+                        if success:
+                            st.session_state.email_login_last_email = email.strip()
+                            msg = result.get("message") if isinstance(result, dict) else str(result)
+                            st.success(msg or "验证码已发送，请查收邮箱。")
+                            st.info("若使用 Supabase，请确保项目已开启 Email OTP / Magic Link。")
+                        else:
+                            msg = result.get("message") if isinstance(result, dict) else str(result)
+                            st.error(msg or "验证码发送失败")
+
+                with col_email_btn2:
+                    if st.button("验证码登录", type="primary", use_container_width=True, key="email_code_login_btn"):
+                        with st.spinner("正在验证验证码..."):
+                            success, result = analyzer.auth.login_with_email_code(email, email_code)
+                        if success:
+                            st.session_state.authenticated = True
+                            st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=email)
+                            st.session_state.user_id = st.session_state.user_info.get('user_id')
+                            st.success("登录成功！")
+                            _log("login", {"email": email, "mode": "email_code"})
+                            st.rerun()
+                        else:
+                            msg = result.get("message") if isinstance(result, dict) else str(result)
+                            st.error(msg or "验证码登录失败")
+
+                st.caption("说明：验证码登录用于免密登录，邮箱需为已注册邮箱。")
 
             with st.expander("快速体验"):
                 st.markdown("""**演示账号**（如已在数据库中创建）：  
 - 用户名：demo_user  
 - 密码：demo123  
 
-也可以直接注册新账号。""")
+也可以直接注册新账号，或使用邮箱验证码免密登录。""")
 
     with tab_register:
         col_left, col_center, col_right = st.columns([1, 2, 1])
