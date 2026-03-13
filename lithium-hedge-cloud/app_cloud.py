@@ -4069,8 +4069,7 @@ def render_inventory_page(analyzer):
         st.error("未获取到用户ID（登录返回未包含 user.id）。请重新登录，或检查 Supabase Auth 返回。")
         return
 
-    if isinstance(user_id, str) and user_id.startswith("user::"):
-        tab1, tab2 = st.tabs(["新增记录", "库存总览"])
+    tab1, tab2 = st.tabs(["新增记录", "库存总览"])
 
     with tab1:
         col1, col2 = st.columns(2)
@@ -4206,8 +4205,7 @@ def render_profit_page(analyzer):
         st.error("未获取到用户ID（登录返回未包含 user.id）。请重新登录，或检查 Supabase Auth 返回。")
         return
 
-    if isinstance(user_id, str) and user_id.startswith("user::"):
-        tab1, tab2 = st.tabs(["新增销售记录", "利润报表"])
+    tab1, tab2 = st.tabs(["新增销售记录", "利润报表"])
 
     with tab1:
         col1, col2 = st.columns(2)
