@@ -776,6 +776,64 @@ class CloudUserAuth:
         # Some helpers may return object/string directly
         return default_ok, ret
 
+    def _get_supabase_rest_config(self):
+        """尽量从环境变量或 Supabase 客户端中提取 REST 所需配置。"""
+        url_candidates = [
+            os.getenv("SUPABASE_URL"),
+            os.getenv("NEXT_PUBLIC_SUPABASE_URL"),
+            getattr(self.supabase, "supabase_url", None) if self.supabase else None,
+            getattr(self.supabase, "url", None) if self.supabase else None,
+        ]
+        key_candidates = [
+            os.getenv("SUPABASE_ANON_KEY"),
+            os.getenv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+            os.getenv("SUPABASE_KEY"),
+            getattr(self.supabase, "supabase_key", None) if self.supabase else None,
+            getattr(self.supabase, "key", None) if self.supabase else None,
+        ]
+        auth = getattr(self.supabase, "auth", None) if self.supabase else None
+        if auth is not None:
+            url_candidates.extend([
+                getattr(auth, "url", None),
+                getattr(auth, "_url", None),
+            ])
+            key_candidates.extend([
+                getattr(auth, "key", None),
+                getattr(auth, "_key", None),
+            ])
+
+        url = next((x.strip().rstrip("/") for x in url_candidates if isinstance(x, str) and x.strip()), None)
+        key = next((x.strip() for x in key_candidates if isinstance(x, str) and x.strip()), None)
+        return url, key
+
+    def _post_gotrue(self, path: str, payload: dict):
+        url, key = self._get_supabase_rest_config()
+        if not url or not key:
+            return False, "缺少 Supabase URL 或 ANON KEY 配置"
+        try:
+            resp = requests.post(
+                f"{url}/auth/v1/{path.lstrip('/')}",
+                json=payload,
+                headers={
+                    "apikey": key,
+                    "Authorization": f"Bearer {key}",
+                    "Content-Type": "application/json",
+                },
+                timeout=20,
+            )
+            if 200 <= resp.status_code < 300:
+                try:
+                    return True, resp.json()
+                except Exception:
+                    return True, resp.text
+            try:
+                err = resp.json()
+            except Exception:
+                err = resp.text
+            return False, err or f"HTTP {resp.status_code}"
+        except Exception as e:
+            return False, str(e)
+
     def register(self, username: str, password: str, email: str):
         """注册用户。返回 (ok, payload/message)"""
         if not self.supabase:
@@ -967,54 +1025,51 @@ class CloudUserAuth:
         return False, "后端未提供邮箱验证码登录接口"
 
     def generate_reset_code(self, username_or_email: str, email: str | None = None):
-        """发送重置验证码。
-
-        当前项目采用邮箱验证码（OTP）重置密码，优先使用 email。
-        """
-        if not self.supabase:
-            return False, "数据库连接失败"
-
+        """发送重置验证码。当前项目固定使用邮箱 OTP 重置密码。"""
         target = (email or username_or_email or "").strip()
         if not target:
             return False, "请输入用户名或邮箱"
         if "@" not in target or "." not in target:
             return False, "请输入有效的注册邮箱"
 
-        for fn_name in ["generate_reset_code", "send_reset_code", "send_password_reset_email", "reset_password_for_email"]:
-            fn = getattr(self.supabase, fn_name, None)
-            if callable(fn):
+        last_err = None
+        if self.supabase:
+            for fn_name in ["generate_reset_code", "send_reset_code", "send_password_reset_email", "reset_password_for_email"]:
+                fn = getattr(self.supabase, fn_name, None)
+                if callable(fn):
+                    try:
+                        ret = fn(target)
+                        ok, payload = self._normalize_result(ret, default_ok=True)
+                        if ok:
+                            return True, target
+                        last_err = payload if isinstance(payload, str) else payload
+                    except Exception as e:
+                        last_err = e
+
+            auth = getattr(self.supabase, "auth", None)
+            if auth and hasattr(auth, "reset_password_for_email"):
                 try:
-                    ret = fn(target)
+                    try:
+                        ret = auth.reset_password_for_email(target)
+                    except TypeError:
+                        ret = auth.reset_password_for_email(target, {})
                     ok, payload = self._normalize_result(ret, default_ok=True)
                     if ok:
                         return True, target
-                    return False, payload if isinstance(payload, str) else "发送重置验证码失败"
+                    last_err = payload if isinstance(payload, str) else payload
                 except Exception as e:
                     last_err = e
-                    # 继续尝试 Supabase auth 原生接口
-                    pass
 
-        auth = getattr(self.supabase, "auth", None)
-        if auth and hasattr(auth, "reset_password_for_email"):
-            try:
-                try:
-                    ret = auth.reset_password_for_email(target)
-                except TypeError:
-                    ret = auth.reset_password_for_email(target, {})
-                ok, payload = self._normalize_result(ret, default_ok=True)
-                if ok:
-                    return True, target
-                return False, payload if isinstance(payload, str) else "发送重置验证码失败"
-            except Exception as e:
-                return False, f"发送重置验证码失败: {e}"
+        # Supabase REST 后备：即使 Python 包未暴露该方法，也可直接调用 GoTrue
+        ok, payload = self._post_gotrue("recover", {"email": target})
+        if ok:
+            return True, target
 
-        return False, "后端未提供重置验证码接口"
+        detail = payload or last_err
+        return False, f"发送重置验证码失败: {detail}" if detail else "发送重置验证码失败"
 
     def reset_password(self, username_or_email: str, reset_code: str | None = None, new_password: str | None = None, email: str | None = None):
         """使用邮箱验证码（OTP）重置密码。"""
-        if not self.supabase:
-            return False, "数据库连接失败"
-
         target_email = (email or username_or_email or "").strip()
         reset_code = (reset_code or "").strip()
         new_password = (new_password or "").strip()
@@ -1026,16 +1081,20 @@ class CloudUserAuth:
         if len(new_password) < 6:
             return False, "新密码至少6位"
 
-        auth = getattr(self.supabase, "auth", None)
+        verify_err = None
+        auth = getattr(self.supabase, "auth", None) if self.supabase else None
         if auth and hasattr(auth, "verify_otp"):
-            verify_err = None
             for payload in [
                 {"email": target_email, "token": reset_code, "type": "recovery"},
                 {"email": target_email, "token": reset_code, "type": "email"},
             ]:
                 try:
-                    auth.verify_otp(payload)
-                    # 验证成功后更新密码
+                    verify_ret = auth.verify_otp(payload)
+                    session = None
+                    if hasattr(verify_ret, "session"):
+                        session = getattr(verify_ret, "session")
+                    elif isinstance(verify_ret, dict):
+                        session = verify_ret.get("session")
                     if hasattr(auth, "update_user"):
                         try:
                             auth.update_user({"password": new_password})
@@ -1043,31 +1102,66 @@ class CloudUserAuth:
                         except TypeError:
                             auth.update_user(password=new_password)
                             return True, "密码重置成功，请使用新密码登录"
-                    # 尝试项目封装或其他后备接口
                     break
                 except Exception as e:
                     verify_err = e
-            if verify_err and not hasattr(auth, "update_user"):
-                # 继续走项目自定义封装
-                pass
-            elif verify_err:
-                return False, f"验证码校验失败: {verify_err}"
 
-        for fn_name in ["reset_password", "set_password", "update_user_password", "update_password"]:
-            fn = getattr(self.supabase, fn_name, None)
-            if callable(fn):
-                try:
+        # 项目自定义后备接口
+        if self.supabase:
+            for fn_name in ["reset_password", "set_password", "update_user_password", "update_password"]:
+                fn = getattr(self.supabase, fn_name, None)
+                if callable(fn):
                     try:
-                        return self._normalize_result(fn(target_email, reset_code, new_password), default_ok=True)
-                    except TypeError:
                         try:
-                            return self._normalize_result(fn(target_email, new_password), default_ok=True)
+                            return self._normalize_result(fn(target_email, reset_code, new_password), default_ok=True)
                         except TypeError:
-                            return self._normalize_result(fn(username_or_email, reset_code, new_password), default_ok=True)
-                except Exception as e:
-                    return False, f"重置密码失败: {e}"
+                            try:
+                                return self._normalize_result(fn(target_email, new_password), default_ok=True)
+                            except TypeError:
+                                return self._normalize_result(fn(username_or_email, reset_code, new_password), default_ok=True)
+                    except Exception as e:
+                        verify_err = e
 
-        return False, "后端未提供验证码重置密码接口"
+        # REST 后备：verify_otp 获取 session，再用 access_token 更新密码
+        ok, payload = self._post_gotrue("verify", {"email": target_email, "token": reset_code, "type": "recovery"})
+        if not ok:
+            ok2, payload2 = self._post_gotrue("verify", {"email": target_email, "token": reset_code, "type": "email"})
+            if ok2:
+                ok, payload = ok2, payload2
+            else:
+                detail = payload2 or payload or verify_err
+                return False, f"验证码校验失败: {detail}" if detail else "验证码校验失败"
+
+        access_token = None
+        if isinstance(payload, dict):
+            session = payload.get("session") or {}
+            access_token = session.get("access_token") or payload.get("access_token")
+        if not access_token:
+            return False, "验证码校验成功，但未获取到会话令牌，无法更新密码"
+
+        url, key = self._get_supabase_rest_config()
+        if not url or not key:
+            return False, "缺少 Supabase URL 或 ANON KEY 配置"
+        try:
+            resp = requests.put(
+                f"{url}/auth/v1/user",
+                json={"password": new_password},
+                headers={
+                    "apikey": key,
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                timeout=20,
+            )
+            if 200 <= resp.status_code < 300:
+                return True, "密码重置成功，请使用新密码登录"
+            try:
+                err = resp.json()
+            except Exception:
+                err = resp.text
+            return False, f"重置密码失败: {err or ('HTTP ' + str(resp.status_code))}"
+        except Exception as e:
+            return False, f"重置密码失败: {e}"
 
     def update_user_settings(self, user_id: str, settings: dict):
         """更新用户设置（可选）。"""
