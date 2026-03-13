@@ -2489,8 +2489,7 @@ def render_auth_page(analyzer):
                             st.session_state.email_login_last_email = email.strip()
                             msg = result.get("message") if isinstance(result, dict) else str(result)
                             st.success(msg or "验证码已发送，请查收邮箱。")
-                            st.info("若使用 Supabase，请确保项目已开启 Email OTP / Magic Link。")
-                        else:
+                            else:
                             msg = result.get("message") if isinstance(result, dict) else str(result)
                             st.error(msg or "验证码发送失败")
 
@@ -3865,9 +3864,7 @@ def render_inventory_page(analyzer):
         return
 
     if isinstance(user_id, str) and user_id.startswith("user::"):
-        st.warning("提示：当前登录返回未包含用户ID，系统临时使用用户名作为云端数据键（仅建议用于演示）。")
-
-    tab1, tab2 = st.tabs(["新增记录", "库存总览"])
+        tab1, tab2 = st.tabs(["新增记录", "库存总览"])
 
     with tab1:
         col1, col2 = st.columns(2)
@@ -4004,9 +4001,7 @@ def render_profit_page(analyzer):
         return
 
     if isinstance(user_id, str) and user_id.startswith("user::"):
-        st.warning("提示：当前登录返回未包含用户ID，系统临时使用用户名作为云端数据键（仅建议用于演示）。")
-
-    tab1, tab2 = st.tabs(["新增销售记录", "利润报表"])
+        tab1, tab2 = st.tabs(["新增销售记录", "利润报表"])
 
     with tab1:
         col1, col2 = st.columns(2)
