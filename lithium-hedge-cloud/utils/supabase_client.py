@@ -350,7 +350,7 @@ class SupabaseManager:
             self.client.auth.sign_in_with_otp({
                 "email": email,
                 "options": {
-                    "should_create_user": False
+                    "shouldCreateUser": False
                 }
             })
             return {"success": True, "message": "验证码已发送，请查收邮箱"}
@@ -368,22 +368,11 @@ class SupabaseManager:
             if not code:
                 return {"success": False, "message": "请输入验证码"}
 
-            auth_result = None
-            verify_errors = []
-            for otp_type in ["email", "magiclink"]:
-                try:
-                    auth_result = self.client.auth.verify_otp({
-                        "email": email,
-                        "token": code,
-                        "type": otp_type
-                    })
-                    break
-                except Exception as e:
-                    verify_errors.append(str(e))
-
-            if auth_result is None:
-                msg = verify_errors[-1] if verify_errors else "验证码校验失败"
-                return {"success": False, "message": f"验证码校验失败: {msg}"}
+            auth_result = self.client.auth.verify_otp({
+                "email": email,
+                "token": code,
+                "type": "email"
+            })
 
             user = self.get_user_by_email(email)
             auth_user = getattr(auth_result, "user", None)
@@ -411,7 +400,6 @@ class SupabaseManager:
                     "auth_result": auth_result,
                 }
 
-            # Auth 登录成功但业务 users 表中没有档案时，仍返回可用最小信息，避免 UI 崩溃
             return {
                 "success": True,
                 "message": "登录成功，但未找到业务用户档案",
