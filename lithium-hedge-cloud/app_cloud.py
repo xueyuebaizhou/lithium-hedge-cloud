@@ -761,16 +761,23 @@ class CloudUserAuth:
         if msg is None:
             return ""
         if isinstance(msg, dict):
-            for key in ["msg", "message", "error_description", "error"]:
+            for key in ["msg", "message", "error_description", "error", "code"]:
                 if key in msg and msg.get(key):
                     return CloudUserAuth._localize_auth_message(msg.get(key))
             return str(msg)
         text = str(msg).strip()
         lower = text.lower()
+
+        # 尽量兼容异常对象、JSON 字符串、HTTP 文本等不同格式
+        compact = lower.replace("\n", " ").replace("\r", " ")
+        compact = compact.replace("_", " ").replace("-", " ")
+
         mappings = [
             ("email rate limit exceeded", "发送过于频繁，请稍后再试"),
-            ("rate limit exceeded", "操作过于频繁，请稍后再试"),
-            ("for security purposes", "操作过于频繁，请稍后再试"),
+            ("rate limit exceeded", "发送过于频繁，请稍后再试"),
+            ("over email send rate limit", "发送过于频繁，请稍后再试"),
+            ("security purposes", "发送过于频繁，请稍后再试"),
+            ("too many requests", "请求过于频繁，请稍后再试"),
             ("invalid login credentials", "邮箱或密码错误"),
             ("invalid otp", "验证码错误或已过期"),
             ("otp expired", "验证码已过期，请重新获取"),
@@ -782,7 +789,7 @@ class CloudUserAuth:
             ("timeout", "请求超时，请稍后重试"),
         ]
         for needle, repl in mappings:
-            if needle in lower:
+            if needle in compact:
                 return repl
         return text
 
@@ -2659,7 +2666,7 @@ def render_auth_page(analyzer):
                             msg = result.get("message") if isinstance(result, dict) else str(result)
                             st.success(msg or "验证码已发送，请查收邮箱。")
                         else:
-                            msg = result.get("message") if isinstance(result, dict) else str(result)
+                            msg = analyzer.auth._localize_auth_message(result.get("message") if isinstance(result, dict) else result)
                             st.error(msg or "验证码发送失败")
 
                 with col_email_btn2:
