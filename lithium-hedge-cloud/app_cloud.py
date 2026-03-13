@@ -2063,8 +2063,8 @@ def main():
         st.session_state.show_forgot_password = False
     if 'show_reset_form' not in st.session_state:
         st.session_state.show_reset_form = False
-    if 'reset_username' not in st.session_state:
-        st.session_state.reset_username = None
+    if 'reset_email' not in st.session_state:
+        st.session_state.reset_email = None
     if 'force_refresh' not in st.session_state:
         st.session_state.force_refresh = False
     
@@ -2421,7 +2421,7 @@ def main():
     if not st.session_state.authenticated:
         if st.session_state.show_forgot_password:
             render_forgot_password(analyzer)
-        elif st.session_state.show_reset_form and st.session_state.reset_username:
+        elif st.session_state.show_reset_form and st.session_state.reset_email:
             render_reset_password(analyzer)
         else:
             render_auth_page(analyzer)
