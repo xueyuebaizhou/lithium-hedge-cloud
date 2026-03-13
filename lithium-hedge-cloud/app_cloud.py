@@ -996,6 +996,16 @@ class CloudUserAuth:
 
         return False, "后端未提供重置码接口"
 
+    def supports_direct_password_reset(self) -> bool:
+        """当前后端是否支持站内直接提交“验证码 + 新密码”完成重置。"""
+        if not self.supabase:
+            return False
+        for fn_name in ["reset_password", "set_password", "update_user_password", "update_password"]:
+            fn = getattr(self.supabase, fn_name, None)
+            if callable(fn):
+                return True
+        return False
+
     def reset_password(self, username_or_email: str, reset_code: str | None = None, new_password: str | None = None):
         """重置密码。
 
@@ -2065,6 +2075,8 @@ def main():
         st.session_state.show_reset_form = False
     if 'reset_email' not in st.session_state:
         st.session_state.reset_email = None
+    if 'reset_username' not in st.session_state:
+        st.session_state.reset_username = None
     if 'force_refresh' not in st.session_state:
         st.session_state.force_refresh = False
     
@@ -2421,7 +2433,7 @@ def main():
     if not st.session_state.authenticated:
         if st.session_state.show_forgot_password:
             render_forgot_password(analyzer)
-        elif st.session_state.show_reset_form and st.session_state.reset_email:
+        elif st.session_state.show_reset_form and (st.session_state.reset_email or st.session_state.reset_username):
             render_reset_password(analyzer)
         else:
             render_auth_page(analyzer)
@@ -2566,39 +2578,54 @@ def render_forgot_password(analyzer):
         with col_center:
             username = st.text_input("用户名", key="forgot_username")
             email = st.text_input("注册邮箱", key="forgot_email")
+            st.caption("说明：当前版本优先使用注册邮箱发送重置邮件；若后端支持站内验证码重置，会自动进入下一步。")
             
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
-                if st.button("获取验证码", use_container_width=True):
+                if st.button("发送重置邮件", use_container_width=True):
                     if username and email:
                         success, result = analyzer.auth.generate_reset_code(username, email)
                         if success:
-                            st.session_state.reset_username = username
-                            st.session_state.show_reset_form = True
-                            st.success(f"验证码已发送到您的邮箱：**{result}**")
-                            st.info("验证码有效期为1小时")
-                            st.rerun()
+                            st.session_state.reset_username = username.strip()
+                            st.session_state.reset_email = email.strip()
+
+                            if analyzer.auth.supports_direct_password_reset():
+                                st.session_state.show_reset_form = True
+                                st.success("验证码已发送，请查收邮箱后继续重置密码。")
+                                st.info("验证码有效期以邮件内容为准。")
+                                st.rerun()
+                            else:
+                                st.session_state.show_reset_form = False
+                                st.success("重置邮件已发送，请到注册邮箱中点击重置链接修改密码。")
+                                st.info("如果收件箱未看到，请同时检查垃圾邮箱/广告邮箱。完成后返回登录页，使用新密码登录。")
                         else:
-                            st.error(result)
+                            msg = result.get("message") if isinstance(result, dict) else str(result)
+                            st.error(msg or "发送重置邮件失败")
                     else:
                         st.error("请输入用户名和邮箱")
             
             with col_btn2:
                 if st.button("返回登录", use_container_width=True):
                     st.session_state.show_forgot_password = False
+                    st.session_state.show_reset_form = False
+                    st.session_state.reset_username = None
+                    st.session_state.reset_email = None
                     st.rerun()
 
 def render_reset_password(analyzer):
     """渲染重置密码页面"""
-    st.markdown(f"### 重置密码 - {st.session_state.reset_username}")
+    target_label = st.session_state.reset_username or st.session_state.reset_email or "当前用户"
+    reset_target = st.session_state.reset_email or st.session_state.reset_username
+
+    st.markdown(f"### 重置密码 - {target_label}")
     
     with st.container():
         col_left, col_center, col_right = st.columns([1, 2, 1])
         
         with col_center:
-            st.info(f"正在为用户 **{st.session_state.reset_username}** 重置密码")
+            st.info(f"正在为 **{target_label}** 重置密码")
             
-            reset_code = st.text_input("验证码", placeholder="请输入6位验证码")
+            reset_code = st.text_input("验证码", placeholder="请输入邮件中的验证码")
             new_password = st.text_input("新密码", type="password", placeholder="至少6个字符")
             confirm_password = st.text_input("确认新密码", type="password")
             
@@ -2612,17 +2639,20 @@ def render_reset_password(analyzer):
                             st.error("密码长度至少6位")
                         else:
                             success, message = analyzer.auth.reset_password(
-                                st.session_state.reset_username, reset_code, new_password
+                                reset_target, reset_code, new_password
                             )
                             if success:
-                                st.success(message)
+                                ok_msg = message.get("message") if isinstance(message, dict) else str(message)
+                                st.success(ok_msg or "密码重置成功")
                                 st.session_state.show_reset_form = False
                                 st.session_state.reset_username = None
+                                st.session_state.reset_email = None
                                 st.session_state.show_forgot_password = False
                                 st.info("请使用新密码登录")
                                 st.rerun()
                             else:
-                                st.error(message)
+                                err_msg = message.get("message") if isinstance(message, dict) else str(message)
+                                st.error(err_msg or "重置密码失败")
                     else:
                         st.error("请填写所有字段")
             
@@ -2630,6 +2660,7 @@ def render_reset_password(analyzer):
                 if st.button("取消", use_container_width=True):
                     st.session_state.show_reset_form = False
                     st.session_state.reset_username = None
+                    st.session_state.reset_email = None
                     st.rerun()
 
     # -------------------------------
