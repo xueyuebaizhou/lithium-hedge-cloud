@@ -757,6 +757,36 @@ class CloudUserAuth:
         self.supabase = supabase if HAS_SUPABASE else None
 
     @staticmethod
+    def _localize_auth_message(msg):
+        if msg is None:
+            return ""
+        if isinstance(msg, dict):
+            for key in ["msg", "message", "error_description", "error"]:
+                if key in msg and msg.get(key):
+                    return CloudUserAuth._localize_auth_message(msg.get(key))
+            return str(msg)
+        text = str(msg).strip()
+        lower = text.lower()
+        mappings = [
+            ("email rate limit exceeded", "发送过于频繁，请稍后再试"),
+            ("rate limit exceeded", "操作过于频繁，请稍后再试"),
+            ("for security purposes", "操作过于频繁，请稍后再试"),
+            ("invalid login credentials", "邮箱或密码错误"),
+            ("invalid otp", "验证码错误或已过期"),
+            ("otp expired", "验证码已过期，请重新获取"),
+            ("token has expired or is invalid", "验证码错误或已过期"),
+            ("email not confirmed", "邮箱尚未完成验证"),
+            ("user not found", "用户不存在"),
+            ("signup is disabled", "当前未开放注册"),
+            ("network", "网络异常，请稍后重试"),
+            ("timeout", "请求超时，请稍后重试"),
+        ]
+        for needle, repl in mappings:
+            if needle in lower:
+                return repl
+        return text
+
+    @staticmethod
     def _normalize_result(ret, default_ok: bool = False):
         """Normalize backend returns to (ok, payload)."""
         if isinstance(ret, tuple):
@@ -830,9 +860,9 @@ class CloudUserAuth:
                 err = resp.json()
             except Exception:
                 err = resp.text
-            return False, err or f"HTTP {resp.status_code}"
+            return False, self._localize_auth_message(err or f"HTTP {resp.status_code}")
         except Exception as e:
-            return False, str(e)
+            return False, self._localize_auth_message(str(e))
 
     def register(self, username: str, password: str, email: str):
         """注册用户。返回 (ok, payload/message)"""
@@ -965,16 +995,16 @@ class CloudUserAuth:
                     try:
                         return self._normalize_result(fn(email=email), default_ok=True)
                     except Exception as e:
-                        return False, f"发送登录验证码失败: {e}"
+                        return False, f"发送邮箱验证码失败: {self._localize_auth_message(e)}"
                 except Exception as e:
-                    return False, f"发送登录验证码失败: {e}"
+                    return False, f"发送邮箱验证码失败: {self._localize_auth_message(e)}"
 
         auth = getattr(self.supabase, "auth", None)
         if auth and hasattr(auth, "sign_in_with_otp"):
             try:
                 return self._normalize_result(auth.sign_in_with_otp({"email": email}), default_ok=True)
             except Exception as e:
-                return False, f"发送登录验证码失败: {e}"
+                return False, f"发送邮箱验证码失败: {self._localize_auth_message(e)}"
 
         return False, "后端未提供邮箱验证码登录接口"
 
@@ -1004,9 +1034,9 @@ class CloudUserAuth:
                     try:
                         return self._normalize_result(fn({"email": email, "token": code}), default_ok=True)
                     except Exception as e:
-                        return False, f"验证码登录失败: {e}"
+                        return False, f"验证码登录失败: {self._localize_auth_message(e)}"
                 except Exception as e:
-                    return False, f"验证码登录失败: {e}"
+                    return False, f"验证码登录失败: {self._localize_auth_message(e)}"
 
         auth = getattr(self.supabase, "auth", None)
         if auth and hasattr(auth, "verify_otp"):
@@ -1020,7 +1050,7 @@ class CloudUserAuth:
                     return self._normalize_result(auth.verify_otp(payload), default_ok=True)
                 except Exception as e:
                     last_err = e
-            return False, f"验证码登录失败: {last_err}" if last_err else "验证码登录失败"
+            return False, f"验证码登录失败: {self._localize_auth_message(last_err)}" if last_err else "验证码登录失败"
 
         return False, "后端未提供邮箱验证码登录接口"
 
@@ -1066,7 +1096,7 @@ class CloudUserAuth:
             return True, target
 
         detail = payload or last_err
-        return False, f"发送重置验证码失败: {detail}" if detail else "发送重置验证码失败"
+        return False, f"发送重置验证码失败: {self._localize_auth_message(detail)}" if detail else "发送重置验证码失败"
 
     def reset_password(self, username_or_email: str, reset_code: str | None = None, new_password: str | None = None, email: str | None = None):
         """使用邮箱验证码（OTP）重置密码。"""
@@ -1130,7 +1160,7 @@ class CloudUserAuth:
                 ok, payload = ok2, payload2
             else:
                 detail = payload2 or payload or verify_err
-                return False, f"验证码校验失败: {detail}" if detail else "验证码校验失败"
+                return False, f"验证码校验失败: {self._localize_auth_message(detail)}" if detail else "验证码校验失败"
 
         access_token = None
         if isinstance(payload, dict):
@@ -1159,9 +1189,9 @@ class CloudUserAuth:
                 err = resp.json()
             except Exception:
                 err = resp.text
-            return False, f"重置密码失败: {err or ('HTTP ' + str(resp.status_code))}"
+            return False, f"重置密码失败: {self._localize_auth_message(err or ('HTTP ' + str(resp.status_code)))}"
         except Exception as e:
-            return False, f"重置密码失败: {e}"
+            return False, f"重置密码失败: {self._localize_auth_message(e)}"
 
     def update_user_settings(self, user_id: str, settings: dict):
         """更新用户设置（可选）。"""
@@ -2616,12 +2646,15 @@ def render_auth_page(analyzer):
                 email = st.text_input("邮箱", placeholder="请输入注册邮箱", key="email_login_email")
                 email_code = st.text_input("邮箱验证码", placeholder="请输入邮箱验证码", key="email_login_code")
 
+                email_login_wait = _cooldown_remaining("email_login_code_sent_at", 60)
+                email_login_btn_text = f"{email_login_wait}秒后重试" if email_login_wait > 0 else "发送验证码"
                 col_email_btn1, col_email_btn2 = st.columns(2)
                 with col_email_btn1:
-                    if st.button("发送验证码", use_container_width=True, key="send_email_login_code_btn"):
+                    if st.button(email_login_btn_text, use_container_width=True, key="send_email_login_code_btn", disabled=email_login_wait > 0):
                         with st.spinner("正在发送验证码..."):
                             success, result = analyzer.auth.send_email_login_code(email)
                         if success:
+                            _mark_code_sent("email_login_code_sent_at")
                             st.session_state.email_login_last_email = email.strip()
                             msg = result.get("message") if isinstance(result, dict) else str(result)
                             st.success(msg or "验证码已发送，请查收邮箱。")
@@ -2692,6 +2725,21 @@ def render_auth_page(analyzer):
     if st.session_state.show_forgot_password:
         render_forgot_password(analyzer)
 
+def _cooldown_remaining(state_key: str, cooldown_seconds: int = 60) -> int:
+    sent_at = st.session_state.get(state_key)
+    if not sent_at:
+        return 0
+    try:
+        elapsed = int(datetime.now().timestamp() - float(sent_at))
+    except Exception:
+        return 0
+    return max(0, cooldown_seconds - elapsed)
+
+
+def _mark_code_sent(state_key: str):
+    st.session_state[state_key] = datetime.now().timestamp()
+
+
 def render_forgot_password(analyzer):
     """渲染忘记密码页面"""
     st.markdown("### 找回密码")
@@ -2703,12 +2751,15 @@ def render_forgot_password(analyzer):
             username = st.text_input("用户名", key="forgot_username")
             email = st.text_input("注册邮箱", key="forgot_email")
             
+            reset_wait = _cooldown_remaining("reset_code_sent_at", 60)
+            reset_btn_text = f"{reset_wait}秒后重试" if reset_wait > 0 else "获取验证码"
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
-                if st.button("获取验证码", use_container_width=True):
+                if st.button(reset_btn_text, use_container_width=True, disabled=reset_wait > 0):
                     if username and email:
                         success, result = analyzer.auth.generate_reset_code(username, email)
                         if success:
+                            _mark_code_sent("reset_code_sent_at")
                             st.session_state.reset_username = username
                             st.session_state.reset_email = email
                             st.session_state.show_forgot_password = False
