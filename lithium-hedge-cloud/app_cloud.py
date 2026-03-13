@@ -2489,7 +2489,7 @@ def render_auth_page(analyzer):
                             st.session_state.email_login_last_email = email.strip()
                             msg = result.get("message") if isinstance(result, dict) else str(result)
                             st.success(msg or "验证码已发送，请查收邮箱。")
-                            else:
+                        else:
                             msg = result.get("message") if isinstance(result, dict) else str(result)
                             st.error(msg or "验证码发送失败")
 
