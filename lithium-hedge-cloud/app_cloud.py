@@ -967,10 +967,9 @@ class CloudUserAuth:
         return False, "后端未提供邮箱验证码登录接口"
 
     def generate_reset_code(self, username_or_email: str, email: str | None = None):
-        """生成/发送重置码（如有邮件验证）。
+        """发送重置验证码。
 
-        兼容旧 UI：可能会同时传入 username 与 email。
-        大多数 Supabase 流程只需要 email，因此优先使用 email。
+        当前项目采用邮箱验证码（OTP）重置密码，优先使用 email。
         """
         if not self.supabase:
             return False, "数据库连接失败"
@@ -978,66 +977,97 @@ class CloudUserAuth:
         target = (email or username_or_email or "").strip()
         if not target:
             return False, "请输入用户名或邮箱"
+        if "@" not in target or "." not in target:
+            return False, "请输入有效的注册邮箱"
 
         for fn_name in ["generate_reset_code", "send_reset_code", "send_password_reset_email", "reset_password_for_email"]:
             fn = getattr(self.supabase, fn_name, None)
             if callable(fn):
                 try:
-                    return self._normalize_result(fn(target), default_ok=True)
+                    ret = fn(target)
+                    ok, payload = self._normalize_result(ret, default_ok=True)
+                    if ok:
+                        return True, target
+                    return False, payload if isinstance(payload, str) else "发送重置验证码失败"
                 except Exception as e:
-                    return False, f"发送重置码失败: {e}"
+                    last_err = e
+                    # 继续尝试 Supabase auth 原生接口
+                    pass
 
         auth = getattr(self.supabase, "auth", None)
         if auth and hasattr(auth, "reset_password_for_email"):
             try:
-                return self._normalize_result(auth.reset_password_for_email(target), default_ok=True)
+                try:
+                    ret = auth.reset_password_for_email(target)
+                except TypeError:
+                    ret = auth.reset_password_for_email(target, {})
+                ok, payload = self._normalize_result(ret, default_ok=True)
+                if ok:
+                    return True, target
+                return False, payload if isinstance(payload, str) else "发送重置验证码失败"
             except Exception as e:
-                return False, f"发送重置码失败: {e}"
+                return False, f"发送重置验证码失败: {e}"
 
-        return False, "后端未提供重置码接口"
+        return False, "后端未提供重置验证码接口"
 
-    def supports_direct_password_reset(self) -> bool:
-        """当前后端是否支持站内直接提交“验证码 + 新密码”完成重置。"""
-        if not self.supabase:
-            return False
-        for fn_name in ["reset_password", "set_password", "update_user_password", "update_password"]:
-            fn = getattr(self.supabase, fn_name, None)
-            if callable(fn):
-                return True
-        return False
-
-    def reset_password(self, username_or_email: str, reset_code: str | None = None, new_password: str | None = None):
-        """重置密码。
-
-        兼容旧 UI：可能会传入 (username, code, new_password)。
-        若后端不需要 reset_code，将忽略。
-        """
+    def reset_password(self, username_or_email: str, reset_code: str | None = None, new_password: str | None = None, email: str | None = None):
+        """使用邮箱验证码（OTP）重置密码。"""
         if not self.supabase:
             return False, "数据库连接失败"
 
-        # 兼容旧签名：如果第二个参数其实是 new_password
-        if new_password is None and reset_code is not None and reset_code:
-            # 旧 UI 会传 reset_code，但在部分实现里其实是 new_password
-            # 这里不做强推断，保持 new_password 必须显式提供。
-            pass
-
+        target_email = (email or username_or_email or "").strip()
+        reset_code = (reset_code or "").strip()
         new_password = (new_password or "").strip()
+
+        if not target_email or "@" not in target_email or "." not in target_email:
+            return False, "缺少有效邮箱，请返回上一步重新获取验证码"
+        if not reset_code:
+            return False, "请输入验证码"
         if len(new_password) < 6:
             return False, "新密码至少6位"
+
+        auth = getattr(self.supabase, "auth", None)
+        if auth and hasattr(auth, "verify_otp"):
+            verify_err = None
+            for payload in [
+                {"email": target_email, "token": reset_code, "type": "recovery"},
+                {"email": target_email, "token": reset_code, "type": "email"},
+            ]:
+                try:
+                    auth.verify_otp(payload)
+                    # 验证成功后更新密码
+                    if hasattr(auth, "update_user"):
+                        try:
+                            auth.update_user({"password": new_password})
+                            return True, "密码重置成功，请使用新密码登录"
+                        except TypeError:
+                            auth.update_user(password=new_password)
+                            return True, "密码重置成功，请使用新密码登录"
+                    # 尝试项目封装或其他后备接口
+                    break
+                except Exception as e:
+                    verify_err = e
+            if verify_err and not hasattr(auth, "update_user"):
+                # 继续走项目自定义封装
+                pass
+            elif verify_err:
+                return False, f"验证码校验失败: {verify_err}"
 
         for fn_name in ["reset_password", "set_password", "update_user_password", "update_password"]:
             fn = getattr(self.supabase, fn_name, None)
             if callable(fn):
                 try:
-                    # 一些实现需要 (username/email, code, new_password)
                     try:
-                        return self._normalize_result(fn(username_or_email, reset_code, new_password), default_ok=True)
+                        return self._normalize_result(fn(target_email, reset_code, new_password), default_ok=True)
                     except TypeError:
-                        return self._normalize_result(fn(username_or_email, new_password), default_ok=True)
+                        try:
+                            return self._normalize_result(fn(target_email, new_password), default_ok=True)
+                        except TypeError:
+                            return self._normalize_result(fn(username_or_email, reset_code, new_password), default_ok=True)
                 except Exception as e:
                     return False, f"重置密码失败: {e}"
 
-        return False, "后端未提供重置密码接口"
+        return False, "后端未提供验证码重置密码接口"
 
     def update_user_settings(self, user_id: str, settings: dict):
         """更新用户设置（可选）。"""
@@ -2578,32 +2608,24 @@ def render_forgot_password(analyzer):
         with col_center:
             username = st.text_input("用户名", key="forgot_username")
             email = st.text_input("注册邮箱", key="forgot_email")
-            st.caption("说明：当前版本优先使用注册邮箱发送重置邮件；若后端支持站内验证码重置，会自动进入下一步。")
             
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
-                if st.button("发送重置邮件", use_container_width=True):
+                if st.button("获取验证码", use_container_width=True):
                     if username and email:
                         success, result = analyzer.auth.generate_reset_code(username, email)
                         if success:
-                            st.session_state.reset_username = username.strip()
-                            st.session_state.reset_email = email.strip()
-
-                            if analyzer.auth.supports_direct_password_reset():
-                                st.session_state.show_reset_form = True
-                                st.success("验证码已发送，请查收邮箱后继续重置密码。")
-                                st.info("验证码有效期以邮件内容为准。")
-                                st.rerun()
-                            else:
-                                st.session_state.show_reset_form = False
-                                st.success("重置邮件已发送，请到注册邮箱中点击重置链接修改密码。")
-                                st.info("如果收件箱未看到，请同时检查垃圾邮箱/广告邮箱。完成后返回登录页，使用新密码登录。")
+                            st.session_state.reset_username = username
+                            st.session_state.reset_email = email
+                            st.session_state.show_forgot_password = False
+                            st.session_state.show_reset_form = True
+                            st.success(f"验证码已发送到您的邮箱：**{email}**")
+                            st.rerun()
                         else:
-                            msg = result.get("message") if isinstance(result, dict) else str(result)
-                            st.error(msg or "发送重置邮件失败")
+                            st.error(result)
                     else:
                         st.error("请输入用户名和邮箱")
-            
+
             with col_btn2:
                 if st.button("返回登录", use_container_width=True):
                     st.session_state.show_forgot_password = False
@@ -2614,21 +2636,24 @@ def render_forgot_password(analyzer):
 
 def render_reset_password(analyzer):
     """渲染重置密码页面"""
-    target_label = st.session_state.reset_username or st.session_state.reset_email or "当前用户"
-    reset_target = st.session_state.reset_email or st.session_state.reset_username
+    reset_username = st.session_state.get("reset_username") or ""
+    reset_email = st.session_state.get("reset_email") or ""
+    title_suffix = reset_username if reset_username else reset_email
+    st.markdown(f"### 重置密码 - {title_suffix}")
 
-    st.markdown(f"### 重置密码 - {target_label}")
-    
     with st.container():
         col_left, col_center, col_right = st.columns([1, 2, 1])
-        
+
         with col_center:
-            st.info(f"正在为 **{target_label}** 重置密码")
-            
-            reset_code = st.text_input("验证码", placeholder="请输入邮件中的验证码")
+            if reset_email:
+                st.info(f"正在为邮箱 **{reset_email}** 重置密码")
+            else:
+                st.info("请输入验证码并设置新密码")
+
+            reset_code = st.text_input("验证码", placeholder="请输入邮箱验证码")
             new_password = st.text_input("新密码", type="password", placeholder="至少6个字符")
             confirm_password = st.text_input("确认新密码", type="password")
-            
+
             col_btn1, col_btn2 = st.columns(2)
             with col_btn1:
                 if st.button("重置密码", type="primary", use_container_width=True):
@@ -2639,28 +2664,26 @@ def render_reset_password(analyzer):
                             st.error("密码长度至少6位")
                         else:
                             success, message = analyzer.auth.reset_password(
-                                reset_target, reset_code, new_password
+                                reset_email or reset_username, reset_code, new_password, email=reset_email
                             )
                             if success:
-                                ok_msg = message.get("message") if isinstance(message, dict) else str(message)
-                                st.success(ok_msg or "密码重置成功")
+                                st.success(message)
                                 st.session_state.show_reset_form = False
                                 st.session_state.reset_username = None
                                 st.session_state.reset_email = None
                                 st.session_state.show_forgot_password = False
-                                st.info("请使用新密码登录")
                                 st.rerun()
                             else:
-                                err_msg = message.get("message") if isinstance(message, dict) else str(message)
-                                st.error(err_msg or "重置密码失败")
+                                st.error(message)
                     else:
                         st.error("请填写所有字段")
-            
+
             with col_btn2:
                 if st.button("取消", use_container_width=True):
                     st.session_state.show_reset_form = False
                     st.session_state.reset_username = None
                     st.session_state.reset_email = None
+                    st.session_state.show_forgot_password = False
                     st.rerun()
 
     # -------------------------------
