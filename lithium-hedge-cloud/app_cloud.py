@@ -3894,47 +3894,48 @@ def render_basis_page(analyzer):
     ref_source = spot_info.get("source", "LOCAL_TABLE")
     ref_is_sim = bool(spot_info.get("is_simulated", True))
 
-    main_col, side_col = st.columns([1.8, 1])
+    st.markdown("### 基准设置")
+    basis_box = st.container()
+    with basis_box:
+        basis_col1, basis_col2, basis_col3 = st.columns([1.15, 1.2, 1.2])
 
-    with side_col:
-        st.markdown("### 基准设置")
-        basis_mode = st.radio(
-            "基准来源",
-            ["市场现货价", "用户自定义", "真实采购成本"],
-            index=["市场现货价", "用户自定义", "真实采购成本"].index(
-                st.session_state.get("basis_mode", "市场现货价")
-            ),
-            key="basis_mode",
-        )
+        with basis_col1:
+            basis_mode = st.radio(
+                "基准来源",
+                ["市场现货价", "用户自定义", "真实采购成本"],
+                index=["市场现货价", "用户自定义", "真实采购成本"].index(
+                    st.session_state.get("basis_mode", "市场现货价")
+                ),
+                key="basis_mode",
+                horizontal=True,
+            )
 
-        if market_spot_price is None:
-            st.metric("市场现货价", "暂无")
-        else:
-            st.metric("市场现货价", f"{market_spot_price:,.0f} 元/吨")
+        with basis_col2:
+            if market_spot_price is None:
+                st.metric("市场现货价", "暂无")
+            else:
+                st.metric("市场现货价", f"{market_spot_price:,.0f} 元/吨")
 
-        user_custom_basis = st.number_input(
-            "用户自定义基准价",
-            min_value=0.0,
-            value=float(st.session_state.get("basis_user_custom_price", market_spot_price or 0.0)),
-            step=500.0,
-            key="basis_user_custom_price",
-        )
-
-        real_purchase_basis = st.number_input(
-            "真实采购成本",
-            min_value=0.0,
-            value=float(st.session_state.get("basis_real_purchase_price", 0.0)),
-            step=500.0,
-            key="basis_real_purchase_price",
-        )
-
-        user_confirm_real = st.checkbox(
-            "我确认“真实采购成本”为企业真实采购/合同成本",
-            value=bool(st.session_state.get("basis_user_confirm_real", False)),
-            key="basis_user_confirm_real",
-        )
-
-        st.caption(f"现货来源：{ref_source}")
+        with basis_col3:
+            user_custom_basis = st.number_input(
+                "用户自定义基准价",
+                min_value=0.0,
+                value=float(st.session_state.get("basis_user_custom_price", market_spot_price or 0.0)),
+                step=500.0,
+                key="basis_user_custom_price",
+            )
+            real_purchase_basis = st.number_input(
+                "真实采购成本",
+                min_value=0.0,
+                value=float(st.session_state.get("basis_real_purchase_price", 0.0)),
+                step=500.0,
+                key="basis_real_purchase_price",
+            )
+            user_confirm_real = st.checkbox(
+                "我确认“真实采购成本”为企业真实采购/合同成本",
+                value=bool(st.session_state.get("basis_user_confirm_real", False)),
+                key="basis_user_confirm_real",
+            )
 
     basis_candidates = {
         "市场现货价": market_spot_price,
@@ -3964,28 +3965,29 @@ def render_basis_page(analyzer):
     latest_diff = latest_futures - float(active_basis_price)
     update_time = display_data["日期"].iloc[-1]
 
-    with main_col:
-        metric_cols = st.columns(4)
-        metric_cols[0].metric("当前基准来源", active_basis_label)
-        metric_cols[1].metric("当前基准价", f"{float(active_basis_price):,.0f}")
-        metric_cols[2].metric("期货收盘价", f"{latest_futures:,.0f}")
-        metric_cols[3].metric(f"价差（基于{active_basis_label}）", f"{latest_diff:+,.0f}")
+    metric_row1 = st.columns(2)
+    metric_row1[0].metric("当前基准来源", active_basis_label)
+    metric_row1[1].metric("当前基准价", f"{float(active_basis_price):,.0f}")
 
-        st.caption(f"现货、期货数据更新时间：{update_time.strftime('%Y-%m-%d')}")
+    metric_row2 = st.columns(2)
+    metric_row2[0].metric("期货收盘价", f"{latest_futures:,.0f}")
+    metric_row2[1].metric(f"价差（基于{active_basis_label}）", f"{latest_diff:+,.0f}")
 
-        for msg in warning_msgs:
-            st.markdown(
-                f"<div style='color:#b00020;font-weight:700;margin-bottom:8px'>{msg}</div>",
-                unsafe_allow_html=True,
-            )
+    st.caption(f"现货、期货数据更新时间：{update_time.strftime('%Y-%m-%d')}")
 
-        fig, ax = plt.subplots(figsize=(12, 5.2))
-        ax.plot(display_data["日期"], display_data["价差"], linewidth=2.2)
-        ax.axhline(0, linestyle="--", linewidth=1)
-        _matplotlib_style(ax, f"价差走势（{active_basis_label}）", "日期", "价差 (元/吨)")
-        plt.xticks(rotation=30)
-        plt.tight_layout()
-        st.pyplot(fig, use_container_width=True)
+    for msg in warning_msgs:
+        st.markdown(
+            f"<div style='color:#b00020;font-weight:700;margin-bottom:8px'>{msg}</div>",
+            unsafe_allow_html=True,
+        )
+
+    fig, ax = plt.subplots(figsize=(13.8, 6.4))
+    ax.plot(display_data["日期"], display_data["价差"], linewidth=2.2)
+    ax.axhline(0, linestyle="--", linewidth=1)
+    _matplotlib_style(ax, f"价差走势（{active_basis_label}）", "日期", "价差 (元/吨)")
+    plt.xticks(rotation=30)
+    plt.tight_layout()
+    st.pyplot(fig, use_container_width=True)
 
     st.markdown("### 三种口径对比")
     compare_rows = []
