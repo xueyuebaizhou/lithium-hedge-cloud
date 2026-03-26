@@ -3835,14 +3835,15 @@ def render_basis_page(analyzer):
     st.markdown("<h1>期货-市场参考价差走势</h1>", unsafe_allow_html=True)
     st.caption("支持按市场现货价、用户自定义、真实采购成本三种口径查看价差。")
 
-    col_left, col_right = st.columns([2, 1])
-
-    with col_left:
+    # 先放一行紧凑的筛选器，避免右侧表单把整页顶部撑出大空白
+    filter_col1, filter_col2 = st.columns([1, 1])
+    with filter_col1:
         symbol = st.selectbox(
             "选择期货主力合约",
             ["LC0", "LC2401", "LC2402", "LC2403", "LC2404", "LC2405", "LC2406"],
             index=0,
         )
+    with filter_col2:
         period = st.selectbox(
             "查看周期",
             ["最近1个月", "最近3个月", "最近6个月", "最近1年"],
@@ -3893,7 +3894,10 @@ def render_basis_page(analyzer):
     ref_source = spot_info.get("source", "LOCAL_TABLE")
     ref_is_sim = bool(spot_info.get("is_simulated", True))
 
-    with col_right:
+    main_col, side_col = st.columns([1.8, 1])
+
+    with side_col:
+        st.markdown("### 基准设置")
         basis_mode = st.radio(
             "基准来源",
             ["市场现货价", "用户自定义", "真实采购成本"],
@@ -3930,6 +3934,8 @@ def render_basis_page(analyzer):
             key="basis_user_confirm_real",
         )
 
+        st.caption(f"现货来源：{ref_source}")
+
     basis_candidates = {
         "市场现货价": market_spot_price,
         "用户自定义": float(user_custom_basis) if float(user_custom_basis) > 0 else None,
@@ -3946,16 +3952,11 @@ def render_basis_page(analyzer):
         )
         return
 
+    warning_msgs = []
     if basis_mode == "市场现货价" and (ref_is_sim or market_spot_price is None):
-        st.markdown(
-            "<div style='color:#b00020;font-weight:700'>当前为模拟数据，禁止用于对外报告</div>",
-            unsafe_allow_html=True,
-        )
+        warning_msgs.append("当前为模拟数据，禁止用于对外报告")
     if basis_mode == "真实采购成本" and not user_confirm_real:
-        st.markdown(
-            "<div style='color:#b00020;font-weight:700'>未确认真实采购成本来源，禁止用于对外报告</div>",
-            unsafe_allow_html=True,
-        )
+        warning_msgs.append("未确认真实采购成本来源，禁止用于对外报告")
 
     display_data["价差"] = display_data["收盘价"] - float(active_basis_price)
 
@@ -3963,21 +3964,28 @@ def render_basis_page(analyzer):
     latest_diff = latest_futures - float(active_basis_price)
     update_time = display_data["日期"].iloc[-1]
 
-    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("当前基准来源", active_basis_label)
-    col_m2.metric("当前基准价", f"{float(active_basis_price):,.0f}")
-    col_m3.metric("期货收盘价", f"{latest_futures:,.0f}")
-    col_m4.metric(f"价差（基于{active_basis_label}）", f"{latest_diff:+,.0f}")
+    with main_col:
+        metric_cols = st.columns(4)
+        metric_cols[0].metric("当前基准来源", active_basis_label)
+        metric_cols[1].metric("当前基准价", f"{float(active_basis_price):,.0f}")
+        metric_cols[2].metric("期货收盘价", f"{latest_futures:,.0f}")
+        metric_cols[3].metric(f"价差（基于{active_basis_label}）", f"{latest_diff:+,.0f}")
 
-    st.caption(f"现货、期货数据更新时间：{update_time.strftime('%Y-%m-%d')}")
+        st.caption(f"现货、期货数据更新时间：{update_time.strftime('%Y-%m-%d')}")
 
-    fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(display_data["日期"], display_data["价差"], linewidth=2.2)
-    ax.axhline(0, linestyle="--", linewidth=1)
-    _matplotlib_style(ax, f"价差走势（{active_basis_label}）", "日期", "价差 (元/吨)")
-    plt.xticks(rotation=30)
-    plt.tight_layout()
-    st.pyplot(fig)
+        for msg in warning_msgs:
+            st.markdown(
+                f"<div style='color:#b00020;font-weight:700;margin-bottom:8px'>{msg}</div>",
+                unsafe_allow_html=True,
+            )
+
+        fig, ax = plt.subplots(figsize=(12, 5.2))
+        ax.plot(display_data["日期"], display_data["价差"], linewidth=2.2)
+        ax.axhline(0, linestyle="--", linewidth=1)
+        _matplotlib_style(ax, f"价差走势（{active_basis_label}）", "日期", "价差 (元/吨)")
+        plt.xticks(rotation=30)
+        plt.tight_layout()
+        st.pyplot(fig, use_container_width=True)
 
     st.markdown("### 三种口径对比")
     compare_rows = []
