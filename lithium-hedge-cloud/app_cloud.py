@@ -3895,11 +3895,27 @@ def render_basis_page(analyzer):
     ref_is_sim = bool(spot_info.get("is_simulated", True))
 
     st.markdown("### 基准设置")
+    st.markdown(
+        """
+        <style>
+        div[role="radiogroup"] {
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            gap: 1.4rem !important;
+        }
+        div[role="radiogroup"] > label {
+            white-space: nowrap !important;
+            min-width: fit-content !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     basis_box = st.container()
     with basis_box:
-        basis_top_left, basis_top_mid, basis_top_right = st.columns([1.05, 1.0, 1.45])
+        basis_left, basis_right = st.columns([1.2, 1.8], gap="large")
 
-        with basis_top_left:
+        with basis_left:
             basis_mode = st.radio(
                 "基准来源",
                 ["市场现货价", "用户自定义", "真实采购成本"],
@@ -3910,30 +3926,21 @@ def render_basis_page(analyzer):
                 horizontal=True,
             )
 
-        with basis_top_mid:
-            if market_spot_price is None:
-                st.metric("市场现货价", "暂无")
-            else:
-                st.metric("市场现货价", f"{market_spot_price:,.0f} 元/吨")
-
-        with basis_top_right:
-            input_col1, input_col2 = st.columns([1, 1], gap="large")
-            with input_col1:
-                user_custom_basis = st.number_input(
-                    "用户自定义基准价",
-                    min_value=0.0,
-                    value=float(st.session_state.get("basis_user_custom_price", market_spot_price or 0.0)),
-                    step=500.0,
-                    key="basis_user_custom_price",
-                )
-            with input_col2:
-                real_purchase_basis = st.number_input(
-                    "真实采购成本",
-                    min_value=0.0,
-                    value=float(st.session_state.get("basis_real_purchase_price", 0.0)),
-                    step=500.0,
-                    key="basis_real_purchase_price",
-                )
+        with basis_right:
+            user_custom_basis = st.number_input(
+                "用户自定义基准价",
+                min_value=0.0,
+                value=float(st.session_state.get("basis_user_custom_price", market_spot_price or 0.0)),
+                step=500.0,
+                key="basis_user_custom_price",
+            )
+            real_purchase_basis = st.number_input(
+                "真实采购成本",
+                min_value=0.0,
+                value=float(st.session_state.get("basis_real_purchase_price", 0.0)),
+                step=500.0,
+                key="basis_real_purchase_price",
+            )
             user_confirm_real = st.checkbox(
                 "我确认“真实采购成本”为企业真实采购/合同成本",
                 value=bool(st.session_state.get("basis_user_confirm_real", False)),
