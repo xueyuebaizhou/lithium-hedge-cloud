@@ -3893,7 +3893,7 @@ def render_basis_page(analyzer):
     market_spot_price = float(market_spot_price) if (market_spot_price is not None and float(market_spot_price) > 0) else None
     ref_source = spot_info.get("source", "LOCAL_TABLE")
     ref_is_sim = bool(spot_info.get("is_simulated", True))
-    st.markdown("<div style='margin-top: 30px'></div>", unsafe_allow_html=True)
+
     st.markdown("### 基准设置")
     st.markdown(
         """
@@ -3927,28 +3927,6 @@ def render_basis_page(analyzer):
             )
 
         with basis_right:
-            st.markdown("""
-            <style>
-            /* 压缩输入框整体高度 */
-            div[data-baseweb="input"] {
-                padding-top: 0px !important;
-                padding-bottom: 0px !important;
-            }
-            
-            /* 压缩label间距 */
-            label {
-                margin-bottom: 4px !important;
-            }
-
-            /* 整体模块更紧凑 */
-            .stNumberInput {
-                margin-bottom: 8px !important;
-            }
-            </style>
-            """, unsafe_allow_html=True)
-            col_main, col_space = st.columns([3,1])
-
-            with col_full:
             user_custom_basis = st.number_input(
                 "用户自定义基准价",
                 min_value=0.0,
