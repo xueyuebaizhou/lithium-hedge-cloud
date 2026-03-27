@@ -3945,6 +3945,17 @@ def render_basis_page(analyzer):
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
+        market_card_value = f"{market_spot_price:,.0f} 元/吨" if market_spot_price is not None else "暂无数据"
+        st.markdown(
+            f"""
+            <div style="background:#ffffff;border-radius:22px;padding:18px 22px;margin-top:10px;box-shadow:0 1px 0 rgba(15,23,42,0.03);">
+                <div style="font-size:15px;color:#6b7280;margin-bottom:8px;">市场现货价</div>
+                <div style="font-size:30px;line-height:1.2;font-weight:700;color:#172554;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{market_card_value}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
     with input_col2:
         st.markdown('<div class="basis-compact">', unsafe_allow_html=True)
         real_purchase_basis = st.number_input(
@@ -3956,13 +3967,13 @@ def render_basis_page(analyzer):
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="basis-confirm-wrap">', unsafe_allow_html=True)
-    user_confirm_real = st.checkbox(
-        "我确认“真实采购成本”为企业真实采购/合同成本",
-        value=bool(st.session_state.get("basis_user_confirm_real", False)),
-        key="basis_user_confirm_real",
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown('<div class="basis-confirm-wrap">', unsafe_allow_html=True)
+        user_confirm_real = st.checkbox(
+            "我确认“真实采购成本”为企业真实采购/合同成本",
+            value=bool(st.session_state.get("basis_user_confirm_real", False)),
+            key="basis_user_confirm_real",
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
 
     basis_candidates = {
         "市场现货价": market_spot_price,
