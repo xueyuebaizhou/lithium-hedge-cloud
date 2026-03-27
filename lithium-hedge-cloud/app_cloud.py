@@ -2908,6 +2908,30 @@ def render_main_app(analyzer):
         selected = st.radio("页面", pages, index=pages.index(st.session_state.current_page), label_visibility="collapsed")
         st.session_state.current_page = selected
 
+        st.markdown("### 实时价格")
+        try:
+            price_data = analyzer.fetch_real_time_data(force_refresh=st.session_state.force_refresh)
+            if st.session_state.force_refresh:
+                st.session_state.force_refresh = False
+
+            if not price_data.empty:
+                latest_price = price_data['收盘价'].iloc[-1]
+                latest_date = price_data['日期'].iloc[-1]
+                price_change = price_data['涨跌幅'].iloc[-1] if '涨跌幅' in price_data.columns else 0
+
+                delta_color = "normal" if price_change >= 0 else "inverse"
+                st.metric(
+                    label="碳酸锂期货",
+                    value=f"{latest_price:,.0f}",
+                    delta=f"{price_change:.2f}%" if price_change != 0 else None,
+                    delta_color=delta_color
+                )
+                st.caption(f"更新时间：{latest_date.strftime('%Y-%m-%d')}")
+            else:
+                st.warning("暂无实时价格数据")
+        except Exception:
+            st.warning("无法获取实时价格")
+
     user_info = st.session_state.user_info or {}
     username = user_info.get('username', '用户')
 
@@ -3061,32 +3085,6 @@ def render_home_page(analyzer):
         - 分析报告汇总输出
         """)
 
-    with st.sidebar:
-        st.markdown("### 实时价格")
-        try:
-            price_data = analyzer.fetch_real_time_data(force_refresh=st.session_state.force_refresh)
-            if st.session_state.force_refresh:
-                st.session_state.force_refresh = False
-
-            if not price_data.empty:
-                latest_price = price_data['收盘价'].iloc[-1]
-                latest_date = price_data['日期'].iloc[-1]
-
-                if '涨跌幅' in price_data.columns:
-                    price_change = price_data['涨跌幅'].iloc[-1]
-                else:
-                    price_change = 0
-
-                delta_color = "normal" if price_change >= 0 else "inverse"
-                st.metric(
-                    label="碳酸锂期货",
-                    value=f"{latest_price:,.0f}",
-                    delta=f"{price_change:.2f}%" if price_change != 0 else None,
-                    delta_color=delta_color
-                )
-                st.caption(f"更新时间：{latest_date.strftime('%Y-%m-%d')}")
-        except Exception:
-            st.warning("无法获取实时价格")
 
 def render_hedge_page(analyzer):
     """渲染套保计算页面"""
