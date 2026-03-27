@@ -3935,6 +3935,10 @@ def render_basis_page(analyzer):
 
     input_col1, input_col2 = st.columns(2, gap="large")
     with input_col1:
+        market_card_value = f"{market_spot_price:,.0f} 元/吨" if market_spot_price is not None else "暂无数据"
+        st.metric("市场现货价", market_card_value)
+
+    with input_col2:
         st.markdown('<div class="basis-compact">', unsafe_allow_html=True)
         user_custom_basis = st.number_input(
             "用户自定义基准价",
@@ -3943,21 +3947,6 @@ def render_basis_page(analyzer):
             step=500.0,
             key="basis_user_custom_price",
         )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        market_card_value = f"{market_spot_price:,.0f} 元/吨" if market_spot_price is not None else "暂无数据"
-        st.markdown(
-            f"""
-            <div style="background:#ffffff;border-radius:22px;padding:18px 22px;margin-top:10px;box-shadow:0 1px 0 rgba(15,23,42,0.03);">
-                <div style="font-size:15px;color:#6b7280;margin-bottom:8px;">市场现货价</div>
-                <div style="font-size:30px;line-height:1.2;font-weight:700;color:#172554;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{market_card_value}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    with input_col2:
-        st.markdown('<div class="basis-compact">', unsafe_allow_html=True)
         real_purchase_basis = st.number_input(
             "真实采购成本",
             min_value=0.0,
