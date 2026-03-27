@@ -3933,12 +3933,13 @@ def render_basis_page(analyzer):
         horizontal=True,
     )
 
-    input_col1, input_col2 = st.columns(2, gap="large")
-    with input_col1:
+    top_col1, top_col2 = st.columns(2, gap="large")
+    with top_col1:
+        st.markdown("<div style='height: 1.35rem;'></div>", unsafe_allow_html=True)
         market_card_value = f"{market_spot_price:,.0f} 元/吨" if market_spot_price is not None else "暂无数据"
         st.metric("市场现货价", market_card_value)
 
-    with input_col2:
+    with top_col2:
         st.markdown('<div class="basis-compact">', unsafe_allow_html=True)
         user_custom_basis = st.number_input(
             "用户自定义基准价",
@@ -3947,20 +3948,26 @@ def render_basis_page(analyzer):
             step=500.0,
             key="basis_user_custom_price",
         )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    bottom_col1, bottom_col2 = st.columns(2, gap="large")
+    with bottom_col1:
+        st.markdown('<div class="basis-confirm-wrap">', unsafe_allow_html=True)
+        user_confirm_real = st.checkbox(
+            "我确认“真实采购成本”为企业真实采购/合同成本",
+            value=bool(st.session_state.get("basis_user_confirm_real", False)),
+            key="basis_user_confirm_real",
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with bottom_col2:
+        st.markdown('<div class="basis-compact">', unsafe_allow_html=True)
         real_purchase_basis = st.number_input(
             "真实采购成本",
             min_value=0.0,
             value=float(st.session_state.get("basis_real_purchase_price", 0.0)),
             step=500.0,
             key="basis_real_purchase_price",
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="basis-confirm-wrap">', unsafe_allow_html=True)
-        user_confirm_real = st.checkbox(
-            "我确认“真实采购成本”为企业真实采购/合同成本",
-            value=bool(st.session_state.get("basis_user_confirm_real", False)),
-            key="basis_user_confirm_real",
         )
         st.markdown("</div>", unsafe_allow_html=True)
 
