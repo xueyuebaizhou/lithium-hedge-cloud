@@ -2346,6 +2346,17 @@ def main():
         color: var(--text);
     }
 
+    [data-testid="stSidebar"] div[role="radiogroup"] {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 0.35rem !important;
+    }
+
+    [data-testid="stSidebar"] div[role="radiogroup"] > label {
+        white-space: normal !important;
+        margin-right: 0 !important;
+    }
+
     .main-header {
         font-size: 2.4rem;
         font-weight: 800;
@@ -3898,68 +3909,60 @@ def render_basis_page(analyzer):
     st.markdown(
         """
         <style>
-        div[role="radiogroup"] {
-            flex-direction: row !important;
-            flex-wrap: nowrap !important;
-            gap: 1.1rem !important;
-        }
-        div[role="radiogroup"] > label {
-            white-space: nowrap !important;
-            min-width: fit-content !important;
-            margin-right: 0.15rem !important;
-        }
         .basis-compact .stNumberInput {
-            margin-bottom: 0.35rem !important;
+            margin-bottom: 0.2rem !important;
         }
         .basis-compact label {
-            margin-bottom: 0.15rem !important;
+            margin-bottom: 0.1rem !important;
         }
-        .basis-compact div[data-baseweb="input"] {
-            max-width: 92% !important;
+        .basis-confirm-wrap {
+            margin-top: 0.15rem;
+            padding-top: 0.1rem;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    basis_box = st.container()
-    with basis_box:
-        basis_left, basis_right = st.columns([1.05, 1.35], gap="medium")
+    basis_mode = st.radio(
+        "基准来源",
+        ["市场现货价", "用户自定义", "真实采购成本"],
+        index=["市场现货价", "用户自定义", "真实采购成本"].index(
+            st.session_state.get("basis_mode", "市场现货价")
+        ),
+        key="basis_mode",
+        horizontal=True,
+    )
 
-        with basis_left:
-            basis_mode = st.radio(
-                "基准来源",
-                ["市场现货价", "用户自定义", "真实采购成本"],
-                index=["市场现货价", "用户自定义", "真实采购成本"].index(
-                    st.session_state.get("basis_mode", "市场现货价")
-                ),
-                key="basis_mode",
-                horizontal=True,
-            )
+    input_col1, input_col2 = st.columns(2, gap="large")
+    with input_col1:
+        st.markdown('<div class="basis-compact">', unsafe_allow_html=True)
+        user_custom_basis = st.number_input(
+            "用户自定义基准价",
+            min_value=0.0,
+            value=float(st.session_state.get("basis_user_custom_price", market_spot_price or 0.0)),
+            step=500.0,
+            key="basis_user_custom_price",
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-        with basis_right:
-            st.markdown('<div class="basis-compact">', unsafe_allow_html=True)
-            st.markdown("<div style='margin-top: 0.25rem'></div>", unsafe_allow_html=True)
-            user_custom_basis = st.number_input(
-                "用户自定义基准价",
-                min_value=0.0,
-                value=float(st.session_state.get("basis_user_custom_price", market_spot_price or 0.0)),
-                step=500.0,
-                key="basis_user_custom_price",
-            )
-            real_purchase_basis = st.number_input(
-                "真实采购成本",
-                min_value=0.0,
-                value=float(st.session_state.get("basis_real_purchase_price", 0.0)),
-                step=500.0,
-                key="basis_real_purchase_price",
-            )
-            st.markdown("<div style='margin-top: 0.15rem'></div>", unsafe_allow_html=True)
-            user_confirm_real = st.checkbox(
-                "我确认“真实采购成本”为企业真实采购/合同成本",
-                value=bool(st.session_state.get("basis_user_confirm_real", False)),
-                key="basis_user_confirm_real",
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
+    with input_col2:
+        st.markdown('<div class="basis-compact">', unsafe_allow_html=True)
+        real_purchase_basis = st.number_input(
+            "真实采购成本",
+            min_value=0.0,
+            value=float(st.session_state.get("basis_real_purchase_price", 0.0)),
+            step=500.0,
+            key="basis_real_purchase_price",
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="basis-confirm-wrap">', unsafe_allow_html=True)
+    user_confirm_real = st.checkbox(
+        "我确认“真实采购成本”为企业真实采购/合同成本",
+        value=bool(st.session_state.get("basis_user_confirm_real", False)),
+        key="basis_user_confirm_real",
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
 
     basis_candidates = {
         "市场现货价": market_spot_price,
