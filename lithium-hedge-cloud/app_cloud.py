@@ -739,12 +739,6 @@ for tpl in ["plotly", "plotly_white", "plotly_dark", "ggplot2", "seaborn", "simp
         pio.templates[tpl].layout.font.family = PLOTLY_FONT_FAMILY
     except Exception:
         pass
-try:
-    pio.templates["simple_white"].layout.paper_bgcolor = "#FFFFFF"
-    pio.templates["simple_white"].layout.plot_bgcolor = "#FAFAFA"
-    pio.templates["simple_white"].layout.font.color = "#2B2F33"
-except Exception:
-    pass
 
 
 # ============================================================================
@@ -2215,12 +2209,130 @@ def black_scholes_price(option_type: str, spot: float, strike: float, time_years
 # Streamlit应用主程序
 # ============================================================================
 
+
+
+# =========================
+# UI assets & helpers (vUI 重构)
+# =========================
+BANNER_IMAGE_PATH = "/mnt/data/virtual_attach_file-7a5b68a8-40cd-4f41-ab1e-2d0912fa0fd8.jpg"
+HOME_REFERENCE_IMAGE_PATH = "/mnt/data/0833c90d-a3df-4b56-a5a2-9a1431e9d0ed-9ab98e37-903c-454f-8493-f85db08fbf69.jpg"
+
+
+def _to_data_uri(local_path: str) -> str:
+    try:
+        with open(local_path, "rb") as f:
+            encoded = base64.b64encode(f.read()).decode("utf-8")
+        ext = os.path.splitext(local_path)[1].lower().replace('.', '') or 'png'
+        if ext == 'jpg':
+            ext = 'jpeg'
+        return f"data:image/{ext};base64,{encoded}"
+    except Exception:
+        return ""
+
+
+def render_standard_page_header(title: str, desc: str):
+    st.markdown(
+        f"""
+        <div class='page-shell'>
+            <div class='page-shell-title'>{title}</div>
+            <div class='page-shell-desc'>{desc}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_global_nav():
+    core_pages = ["首页", "价格行情", "价差走势", "套保计算", "多情景分析", "期权计算", "分析报告"]
+    extra_pages = ["风险敞口", "库存管理", "利润管理", "分析历史", "策略管理", "账号设置"]
+    page_alias = {"期权计算": "期权保险"}
+    current_page = st.session_state.get("current_page", "首页")
+    nav_value = "期权计算" if current_page == "期权保险" else current_page
+    if nav_value not in core_pages:
+        nav_value = "首页"
+
+    banner_uri = _to_data_uri(BANNER_IMAGE_PATH)
+    st.markdown(
+        f"""
+        <div class='eh-navbar'>
+            <div class='eh-navbar-inner'>
+                <div class='eh-brand'>
+                    <div class='eh-brand-title'>熵合科技</div>
+                    <div class='eh-brand-sub'>新能源风险管理SaaS</div>
+                </div>
+                <div class='eh-navbar-right'>
+                    <div class='eh-navbar-meta'>大连熵合科技有限公司｜面向碳酸锂产业链企业的一体化数字平台</div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    nav_choice = st.radio(
+        "顶部导航",
+        core_pages,
+        horizontal=True,
+        index=core_pages.index(nav_value),
+        label_visibility="collapsed",
+        key="top_nav_core",
+    )
+    target_page = page_alias.get(nav_choice, nav_choice)
+    if target_page != current_page:
+        st.session_state.current_page = target_page
+        st.rerun()
+
+    with st.expander("更多模块", expanded=current_page not in core_pages):
+        extra_choice = st.radio(
+            "扩展模块",
+            extra_pages,
+            horizontal=True,
+            index=extra_pages.index(current_page) if current_page in extra_pages else 0,
+            label_visibility="collapsed",
+            key="top_nav_extra",
+        )
+        if current_page not in core_pages and extra_choice != current_page:
+            st.session_state.current_page = extra_choice
+            st.rerun()
+        cols = st.columns([1.1, 1.1, 1.1, 1.1, 1.1, 1.1])
+        for i, label in enumerate(extra_pages):
+            if cols[i].button(label, use_container_width=True, key=f"extra_btn_{label}"):
+                st.session_state.current_page = label
+                st.rerun()
+
+    try:
+        price_data = st.session_state.get("_nav_price_cache")
+        if price_data is None:
+            analyzer = st.session_state.get("_analyzer_ref")
+            if analyzer:
+                price_data = analyzer.fetch_real_time_data(force_refresh=st.session_state.get("force_refresh", False))
+                st.session_state["_nav_price_cache"] = price_data
+        if price_data is not None and not price_data.empty:
+            latest_price = float(price_data['收盘价'].iloc[-1])
+            latest_date = pd.to_datetime(price_data['日期'].iloc[-1]).strftime('%Y-%m-%d')
+            latest_chg = float(price_data['涨跌幅'].iloc[-1]) if '涨跌幅' in price_data.columns and not pd.isna(price_data['涨跌幅'].iloc[-1]) else 0.0
+            user_info = st.session_state.get('user_info') or {}
+            username = user_info.get('username', '用户')
+            st.markdown(
+                f"""
+                <div class='eh-statusbar'>
+                    <div class='eh-status-item'><span>当前用户</span><strong>{username}</strong></div>
+                    <div class='eh-status-item'><span>碳酸锂期货</span><strong>{latest_price:,.0f}</strong></div>
+                    <div class='eh-status-item'><span>日涨跌幅</span><strong>{latest_chg:+.2f}%</strong></div>
+                    <div class='eh-status-item'><span>数据日期</span><strong>{latest_date}</strong></div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        pass
+
+
 def main():
     st.set_page_config(
-        page_title="碳酸锂期货套保分析系统（云端版）",
+        page_title="熵合科技｜新能源企业风险管理SaaS平台",
         page_icon="LC",
         layout="wide",
-        initial_sidebar_state="expanded"
+        initial_sidebar_state="collapsed"
     )
     
     # 初始化分析器
@@ -2250,513 +2362,181 @@ def main():
     # 自定义CSS
     st.markdown("""
     <style>
-    /* 隐藏 Streamlit 默认标识与工具栏（保留 header，避免侧边栏收起后无法恢复） */
-    #MainMenu {visibility: hidden !important;}
-    footer {visibility: hidden !important;}
-    .stDeployButton {display: none !important;}
-    [data-testid="stToolbar"] {display: none !important;}
-    [data-testid="stDecoration"] {display: none !important;}
-    [data-testid="stStatusWidget"] {display: none !important;}
-    [data-testid="stHeaderActionElements"] {display: none !important;}
-    [data-testid="stMainMenu"] {display: none !important;}
-    [data-testid="stAppDeployButton"] {display: none !important;}
-    button[kind="header"] {display: none !important;}
+    #MainMenu, footer, [data-testid="stToolbar"], [data-testid="stStatusWidget"], [data-testid="stDecoration"], [data-testid="stHeaderActionElements"] {display:none !important;}
+    [data-testid="stSidebar"], [data-testid="collapsedControl"] {display:none !important;}
 
-    /* 隐藏默认侧边栏（主导航已移至顶部） */
-    [data-testid="collapsedControl"] {display: none !important;}
-    [data-testid="stSidebarCollapsedControl"] {display: none !important;}
-    [data-testid="stSidebarCollapseButton"] {display: none !important;}
-    section[data-testid="stSidebar"] {
-        display: none !important;
-    }
-
-    /* 强制隐藏 Hosted with Streamlit 红条 / 云部署徽标 */
-    a[href*="streamlit.io"],
-    a[href*="share.streamlit.io"],
-    a[href*="streamlit.app"],
-    [href*="streamlit.io"],
-    [href*="share.streamlit.io"],
-    [href*="streamlit.app"],
-    [title*="Hosted with Streamlit"],
-    [aria-label*="Hosted with Streamlit"],
-    [aria-label*="Open app menu"],
-    img[alt*="Streamlit"],
-    img[alt*="streamlit"] {
-        display: none !important;
-        visibility: hidden !important;
-        width: 0 !important;
-        height: 0 !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-    }
-
-    div:has(> a[href*="streamlit.io"]),
-    div:has(> a[href*="share.streamlit.io"]),
-    div:has(> a[href*="streamlit.app"]),
-    div:has(img[alt*="Streamlit"]),
-    div:has(img[alt*="streamlit"]),
-    div:has([title*="Hosted with Streamlit"]),
-    div:has([aria-label*="Hosted with Streamlit"]) {
-        display: none !important;
-        visibility: hidden !important;
-        width: 0 !important;
-        height: 0 !important;
-        opacity: 0 !important;
-        pointer-events: none !important;
-    }
     :root {
         --bg: #F7F7F7;
-        --card: #ffffff;
-        --line: #e8e8e8;
+        --card: #FFFFFF;
+        --line: #E8EAED;
         --text: #2B2F33;
         --muted: #666666;
-        --gold: #D4A017;
-        --gold-soft: rgba(212, 160, 23, 0.12);
-        --shadow-card: 0 4px 20px rgba(0,0,0,0.04);
+        --gold: #C9A96B;
+        --gold-deep: #B9924D;
+        --green-soft: #EAF1EB;
+        --shadow: 0 4px 20px rgba(0,0,0,0.04);
         --radius: 12px;
+        --maxw: 1320px;
     }
 
     html, body, [class*="css"] {
-        font-family: "Microsoft YaHei", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+        font-family: "NotoSansCJKSC", "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
         color: var(--text);
     }
-
-    .stApp {
-        background: var(--bg);
-        color: var(--text);
+    .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
+        background: var(--bg) !important;
     }
-
-    [data-testid="stAppViewContainer"] {
-        background: var(--bg);
-    }
-
-    [data-testid="stHeader"] {
-        background: transparent;
-    }
-
     .block-container {
-        padding-top: 1rem;
-        padding-bottom: 2.5rem;
-        max-width: 1320px;
+        max-width: var(--maxw);
+        padding-top: 1.2rem;
+        padding-bottom: 3rem;
     }
-
+    h1, h2, h3, h4, p, label, div, span {
+        color: var(--text);
+    }
     .main-header {
-        font-size: 2.1rem;
-        font-weight: 800;
-        color: var(--text);
-        text-align: center;
-        letter-spacing: -0.02em;
-        margin: 0.2rem 0 0.2rem 0;
+        font-size: 2.5rem; font-weight: 800; text-align: center; margin: 1rem 0 .35rem 0; letter-spacing: -0.02em;
     }
+    .auth-subtitle {
+        text-align:center; color:var(--muted); margin-bottom: 1.2rem;
+    }
+    .eh-navbar {
+        background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.90) 100%);
+        border: 1px solid rgba(201,169,107,0.14);
+        border-radius: 16px;
+        padding: 16px 22px 12px 22px;
+        box-shadow: var(--shadow);
+        position: sticky; top: 0.5rem; z-index: 20; backdrop-filter: blur(10px);
+        margin-bottom: .35rem;
+    }
+    .eh-navbar-inner {display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;}
+    .eh-brand-title {font-size: 1.55rem; font-weight: 800; letter-spacing: 0.02em;}
+    .eh-brand-sub {font-size:.88rem; color:var(--muted); margin-top: 2px;}
+    .eh-navbar-meta {font-size:.92rem; color:var(--muted);}
 
-    /* 顶部横向导航 */
-    .topnav-shell {
-        background: #ffffff;
-        border-bottom: 1px solid var(--line);
-        margin: 0 -1.25rem 1.15rem -1.25rem;
-        padding: 0 1.5rem 0.35rem 1.5rem;
-        box-shadow: var(--shadow-card);
-    }
-    @media (max-width: 900px) {
-        .topnav-shell { margin: 0 -0.75rem 1rem -0.75rem; padding: 0 0.75rem; }
-    }
-    .topnav-inner {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 1rem;
-        flex-wrap: wrap;
-        padding: 0.85rem 0 0.25rem 0;
-        max-width: 1320px;
-        margin: 0 auto;
-    }
-    .topnav-brand { min-width: 160px; }
-    .brand-name {
-        font-size: 1.35rem;
-        font-weight: 800;
-        color: var(--text);
-        letter-spacing: -0.02em;
-        line-height: 1.2;
-    }
-    .brand-sub {
-        font-size: 0.78rem;
-        color: var(--muted);
-        margin-top: 2px;
-    }
-    .topnav-links {
-        display: flex;
-        align-items: center;
-        justify-content: flex-end;
-        flex-wrap: wrap;
-        gap: 0.15rem 0.35rem;
-        flex: 1;
-    }
-    .topnav-link {
-        display: inline-block;
-        padding: 0.45rem 0.65rem;
-        font-size: 0.92rem;
-        font-weight: 600;
-        color: var(--text) !important;
-        text-decoration: none !important;
-        border-bottom: 2px solid transparent;
-        transition: color 0.15s ease, border-color 0.15s ease;
-    }
-    .topnav-link:hover {
-        color: var(--gold) !important;
-    }
-    .topnav-link.is-active {
-        border-bottom-color: var(--gold);
-        color: var(--text) !important;
-    }
-    .topnav-user {
-        font-size: 0.82rem;
-        color: var(--muted);
-        white-space: nowrap;
-    }
-    .topnav-subrow {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.35rem 0.65rem;
-        padding: 0.15rem 0 0.65rem 0;
-        max-width: 1320px;
-        margin: 0 auto;
-        border-top: 1px solid #f0f0f0;
-    }
-    .topnav-sub-label {
-        font-size: 0.75rem;
-        color: #999;
-        margin-right: 0.25rem;
-    }
-    .topnav-sublink {
-        font-size: 0.8rem;
+    div[role="radiogroup"] {gap: .45rem;}
+    div[role="radiogroup"] label {
+        background: transparent !important;
+        border: none !important;
+        border-bottom: 2px solid transparent !important;
+        border-radius: 0 !important;
+        padding: .45rem .75rem .55rem .75rem !important;
         color: var(--muted) !important;
-        text-decoration: none !important;
-        padding: 0.15rem 0;
+        font-weight: 700 !important;
+        min-height: auto !important;
     }
-    .topnav-sublink:hover { color: var(--gold) !important; }
-    .topnav-sublink.is-active {
-        color: var(--text) !important;
-        font-weight: 700;
-        border-bottom: 2px solid var(--gold);
+    div[role="radiogroup"] label[data-baseweb="radio"]:has(input:checked),
+    div[role="radiogroup"] label:has(input:checked) {
+        color: var(--gold-deep) !important;
+        border-bottom: 2px solid var(--gold) !important;
+        background: transparent !important;
     }
+    div[role="radiogroup"] p {font-size: 1rem !important;}
 
-    /* 内页标题区 */
-    .saas-page-head {
-        background: var(--card);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow-card);
-        border: 1px solid var(--line);
-        padding: 1.25rem 1.5rem;
-        margin-bottom: 1.1rem;
+    .eh-statusbar {
+        display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 14px;
+        margin: .8rem 0 1.2rem 0;
     }
-    .saas-page-title {
-        font-size: 1.65rem;
-        font-weight: 800;
-        color: var(--text);
-        margin: 0 0 0.35rem 0;
-        letter-spacing: -0.02em;
+    .eh-status-item {
+        background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+        box-shadow: var(--shadow); padding: 14px 16px;
     }
-    .saas-page-sub {
-        font-size: 0.95rem;
-        color: var(--muted);
-        margin: 0;
-        line-height: 1.55;
-    }
+    .eh-status-item span {display:block; font-size:.84rem; color:var(--muted); margin-bottom:4px;}
+    .eh-status-item strong {font-size:1.08rem; color:var(--text);}
 
-    /* 行情条 */
-    .live-price-strip {
-        background: var(--card);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow-card);
-        border: 1px solid var(--line);
-        padding: 0.5rem 1rem 0.15rem 1rem;
-        margin-bottom: 1rem;
+    .page-shell, .soft-card, .hero-card, .quick-card, [data-testid="stMetric"], [data-testid="stExpander"], .stDataFrame, [data-testid="stTable"] {
+        background: var(--card) !important; border: 1px solid var(--line) !important; border-radius: var(--radius) !important; box-shadow: var(--shadow) !important;
     }
+    .page-shell {padding: 24px 26px; margin: .4rem 0 1rem 0;}
+    .page-shell-title {font-size: 2rem; font-weight: 800; letter-spacing: -0.02em;}
+    .page-shell-desc {margin-top: .4rem; color: var(--muted); line-height: 1.8;}
 
-    /* 官网首页 */
-    .corp-hero {
-        position: relative;
-        border-radius: var(--radius);
-        overflow: hidden;
-        min-height: 340px;
-        margin-bottom: 1.5rem;
-        box-shadow: var(--shadow-card);
+    .hero-card {padding: 0 !important; overflow: hidden;}
+    .hero-banner {
+        position: relative; min-height: 520px; border-radius: 12px; overflow: hidden;
+        background-size: cover; background-position: center center;
     }
-    .corp-hero-bg {
-        position: absolute;
-        inset: 0;
-        background-size: cover;
-        background-position: center 28%;
-        filter: blur(1.2px);
-        transform: scale(1.04);
+    .hero-banner::before {
+        content: ""; position:absolute; inset:0;
+        background: rgba(20,30,40,0.45);
+        backdrop-filter: blur(2px);
     }
-    .corp-hero-dim {
-        position: absolute;
-        inset: 0;
-        background: rgba(20, 30, 40, 0.45);
+    .hero-banner::after {
+        content: ""; position:absolute; inset:0;
+        background: linear-gradient(90deg, rgba(20,30,40,0.72) 0%, rgba(20,30,40,0.58) 30%, rgba(20,30,40,0.18) 62%, rgba(20,30,40,0.05) 100%);
     }
-    .corp-hero-grad {
-        position: absolute;
-        inset: 0;
-        background: linear-gradient(90deg, rgba(15, 22, 32, 0.82) 0%, rgba(15, 22, 32, 0.35) 48%, rgba(15, 22, 32, 0.12) 100%);
+    .hero-content {
+        position:relative; z-index:2; max-width: 620px; padding: 76px 56px; color:#fff;
     }
-    .corp-hero-blur {
-        position: absolute;
-        inset: 0;
-        backdrop-filter: blur(3px);
-        -webkit-backdrop-filter: blur(3px);
-    }
-    .corp-hero-inner {
-        position: relative;
-        z-index: 2;
-        padding: 2.5rem 2.25rem 2.25rem 2.25rem;
-        max-width: 560px;
-    }
-    .corp-hero h1 {
-        color: #ffffff;
-        font-size: 2rem;
-        font-weight: 800;
-        margin: 0 0 0.65rem 0;
-        line-height: 1.25;
-        letter-spacing: -0.02em;
-        text-shadow: 0 2px 18px rgba(0,0,0,0.35);
-    }
-    .corp-hero .sub {
-        color: rgba(255,255,255,0.92);
-        font-size: 1.05rem;
-        line-height: 1.6;
-        margin: 0 0 1.35rem 0;
-    }
+    .hero-kicker {font-size:.95rem; color: rgba(255,255,255,.76); letter-spacing: .14em; text-transform: uppercase;}
+    .hero-title {font-size: 3rem; line-height: 1.18; font-weight: 800; color:#fff; margin: 1rem 0 .9rem 0;}
+    .hero-desc {font-size: 1.04rem; line-height: 1.9; color: rgba(255,255,255,.88); max-width: 560px;}
+    .hero-action-tip {margin-top: 1.2rem; color: rgba(255,255,255,.72); font-size: .92rem;}
 
-    .corp-section {
-        background: var(--card);
-        border-radius: var(--radius);
-        box-shadow: var(--shadow-card);
-        border: 1px solid var(--line);
-        padding: 1.75rem 1.75rem;
-        margin-bottom: 1.25rem;
-    }
-    .corp-section h2 {
-        font-size: 1.45rem;
-        font-weight: 800;
-        color: var(--text);
-        margin: 0 0 0.25rem 0;
-    }
-    .corp-section .en {
-        font-size: 0.88rem;
-        color: #999;
-        margin: 0 0 1rem 0;
-    }
-    .corp-section p {
-        color: var(--muted);
-        line-height: 1.85;
-        font-size: 0.98rem;
-        margin: 0 0 0.85rem 0;
-    }
-    .corp-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-        gap: 1rem;
-    }
-    .corp-card {
-        background: #ffffff;
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        padding: 1.1rem 1.15rem;
-        min-height: 88px;
-        box-shadow: var(--shadow-card);
-    }
-    .corp-card .t {
-        font-weight: 700;
-        color: var(--text);
-        font-size: 1rem;
-        margin-bottom: 0.35rem;
-    }
-    .corp-card .d { font-size: 0.88rem; color: var(--muted); line-height: 1.5; }
+    .section-title {font-size: 1.8rem; font-weight: 800; margin: 1.5rem 0 .35rem 0; letter-spacing: -.02em;}
+    .section-kicker {font-size: .92rem; color: var(--gold-deep); text-transform: uppercase; letter-spacing: .12em;}
+    .section-subtle {color: var(--muted); line-height: 1.9; margin-bottom: 1rem;}
 
-    .corp-flow {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        gap: 0.5rem 0.35rem;
-        justify-content: center;
-        padding: 0.5rem 0;
-    }
-    .corp-flow span {
-        background: #ffffff;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        padding: 0.45rem 0.95rem;
-        font-size: 0.9rem;
-        color: var(--text);
-        font-weight: 600;
-    }
-    .corp-flow i { color: var(--gold); font-style: normal; font-weight: 800; }
+    .intro-grid {display:grid; grid-template-columns: 1.35fr .85fr; gap: 20px; margin: 1rem 0 1.2rem 0;}
+    .intro-card {padding: 28px; background: var(--card); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);}
+    .intro-card p {color: var(--muted); line-height: 1.95; font-size: 1rem;}
+    .intro-image-card {padding: 16px; background: linear-gradient(180deg,#fff,#faf8f2); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);}
+    .intro-image-card img {width:100%; height:100%; min-height: 280px; object-fit: cover; border-radius: 10px; display:block;}
 
-    .corp-footer {
-        text-align: center;
-        padding: 2rem 1rem 1rem 1rem;
-        color: var(--muted);
-        font-size: 0.9rem;
-        line-height: 1.8;
+    .cap-grid {display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; margin: .9rem 0 1.2rem 0;}
+    .scene-grid {display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; margin: .9rem 0 1.2rem 0;}
+    .cap-card, .scene-card {
+        background: var(--card); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px;
     }
-    .corp-footer a { color: var(--muted); }
+    .cap-index, .scene-index {font-size:.82rem; color: var(--gold-deep); font-weight:700; letter-spacing:.08em;}
+    .cap-title, .scene-title {font-size: 1.15rem; font-weight:800; margin:.55rem 0 .45rem 0;}
+    .cap-text, .scene-text {color: var(--muted); line-height:1.8; font-size:.94rem;}
 
-    .section-title {
-        font-size: 1.45rem;
-        font-weight: 800;
-        color: var(--text);
-        margin: 1.3rem 0 0.9rem 0;
-        letter-spacing: -0.01em;
+    .process-wrap {
+        display:grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 14px; margin: 1rem 0 1.3rem 0;
     }
+    .process-step {
+        position:relative; background:var(--card); border:1px solid var(--line); border-radius: var(--radius); padding: 20px 16px; box-shadow: var(--shadow);
+        min-height: 118px;
+    }
+    .process-step:not(:last-child)::after {
+        content: "→"; position:absolute; right:-12px; top:50%; transform:translateY(-50%); color: var(--gold-deep); font-size: 1.35rem; font-weight:700;
+    }
+    .process-no {display:inline-flex; width:30px; height:30px; border-radius:999px; align-items:center; justify-content:center; background: rgba(201,169,107,.14); color:var(--gold-deep); font-weight:800; margin-bottom:10px;}
+    .process-title {font-size: 1rem; font-weight:700; line-height:1.7;}
 
-    .section-subtle {
-        color: var(--muted);
-        font-size: 0.96rem;
-        margin-bottom: 0.8rem;
+    .home-footer {
+        margin-top: 1.4rem; background: linear-gradient(180deg,#fff,#fafafa); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px 26px;
     }
-
-    .soft-card {
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        padding: 20px 20px 18px 20px;
-        box-shadow: var(--shadow-card);
-        margin-bottom: 1rem;
-    }
-
-    .quick-card {
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        padding: 18px 18px 16px 18px;
-        box-shadow: var(--shadow-card);
-        min-height: 158px;
-        margin-bottom: 0.5rem;
-    }
-
-    .quick-card-title {
-        font-size: 1.35rem;
-        font-weight: 800;
-        color: var(--text);
-        margin: 0 0 0.45rem 0;
-        letter-spacing: -0.02em;
-    }
-
-    .quick-card-desc {
-        color: var(--muted);
-        font-size: 0.95rem;
-        line-height: 1.65;
-        margin-bottom: 0.9rem;
-    }
-
-    .info-grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 16px;
-    }
-
-    .info-card {
-        background: #ffffff;
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        padding: 18px 18px 16px 18px;
-        box-shadow: var(--shadow-card);
-    }
-
-    .info-card-title {
-        font-size: 1.05rem;
-        font-weight: 700;
-        color: var(--text);
-        margin-bottom: 0.55rem;
-    }
-
-    .info-card-desc {
-        color: var(--muted);
-        line-height: 1.72;
-        font-size: 0.94rem;
-        margin: 0;
-    }
+    .home-footer-title {font-size:1.08rem; font-weight:800; margin-bottom:8px;}
+    .home-footer p {margin:.25rem 0; color: var(--muted);}
 
     .stButton > button {
-        border-radius: var(--radius);
-        border: 1px solid var(--line);
-        background: #ffffff;
-        color: var(--text);
-        min-height: 2.75rem;
-        font-weight: 700;
-        transition: all 0.18s ease;
-        box-shadow: none;
+        border-radius: 12px !important; min-height: 2.9rem !important; font-weight: 700 !important;
+        border: 1px solid rgba(201,169,107,.25) !important; background: #fff !important; color: var(--text) !important;
+        box-shadow: var(--shadow) !important;
     }
-
-    .stButton > button:hover {
-        border-color: rgba(212, 160, 23, 0.45);
-        color: var(--text);
-        box-shadow: var(--shadow-card);
-        transform: translateY(-1px);
-    }
-
+    .stButton > button:hover {border-color: var(--gold) !important; color: var(--gold-deep) !important;}
     button[kind="primary"], button[data-testid="baseButton-primary"] {
-        color: #ffffff !important;
-        background: linear-gradient(135deg, #c49212 0%, #a67a0e 100%) !important;
-        border: none !important;
-        font-weight: 700 !important;
-        box-shadow: 0 8px 18px rgba(166, 122, 14, 0.22) !important;
+        background: linear-gradient(135deg, #cfb177 0%, #b9924d 100%) !important; color:#fff !important; border:none !important;
     }
+    [data-testid="stMetric"] {padding: 16px 16px !important;}
+    [data-testid="stMetricLabel"] {color: var(--muted) !important; font-weight:600 !important;}
+    [data-testid="stMetricValue"] {color: var(--text) !important;}
+    [data-testid="stExpander"] details summary {background:#FCFBF7 !important; color:var(--text) !important; font-weight:700 !important;}
+    [data-testid="stAlert"] {border-radius: 12px !important;}
+    hr {border:none; border-top:1px solid var(--line); margin: 1.2rem 0 1.35rem 0;}
 
-    button[kind="primary"]:hover, button[data-testid="baseButton-primary"]:hover {
-        color: #ffffff !important;
-        filter: brightness(1.03);
+    @media (max-width: 1100px) {
+        .eh-statusbar, .cap-grid, .scene-grid, .process-wrap, .intro-grid {grid-template-columns: 1fr 1fr !important;}
+        .hero-content {padding: 56px 32px;}
+        .hero-title {font-size: 2.3rem;}
     }
-
-    [data-testid="stMetric"] {
-        background: #ffffff;
-        border: 1px solid var(--line);
-        border-radius: var(--radius);
-        padding: 14px 16px;
-        box-shadow: var(--shadow-card);
-    }
-
-    [data-testid="stMetricLabel"] {
-        color: var(--muted);
-        font-weight: 600;
-    }
-
-    [data-testid="stMetricValue"] {
-        color: var(--text);
-    }
-
-    [data-testid="stExpander"] {
-        border: 1px solid var(--line) !important;
-        border-radius: var(--radius) !important;
-        overflow: hidden;
-        background: #ffffff;
-        box-shadow: var(--shadow-card);
-        margin-bottom: 0.8rem;
-    }
-
-    [data-testid="stExpander"] details summary {
-        background: #fafafa;
-        font-weight: 700;
-        color: var(--text);
-    }
-
-    .stDataFrame, [data-testid="stTable"] {
-        background: #ffffff;
-        border-radius: var(--radius);
-        overflow: hidden;
-        border: 1px solid var(--line);
-    }
-
-    [data-testid="stAlert"] {
-        border-radius: var(--radius);
-    }
-
-    hr {
-        border: none;
-        border-top: 1px solid var(--line);
-        margin: 1.2rem 0 1.4rem 0;
+    @media (max-width: 760px) {
+        .eh-navbar-inner, .intro-grid, .cap-grid, .scene-grid, .process-wrap, .eh-statusbar {grid-template-columns: 1fr !important; display:grid !important;}
+        .hero-banner {min-height: 460px;}
+        .hero-content {padding: 40px 22px;}
+        .hero-title {font-size: 2rem;}
     }
     </style>
     """, unsafe_allow_html=True)
@@ -2784,7 +2564,7 @@ def main():
 def render_auth_page(analyzer):
     """渲染登录/注册页面"""
     st.markdown('<h1 class="main-header">碳酸锂期货套保分析系统</h1>', unsafe_allow_html=True)
-    st.markdown('<p style="text-align:center;color:#6e6e73;font-size:1.05rem;">云端存储 · 实时数据 · 专业分析</p>', unsafe_allow_html=True)
+    st.markdown('<p class="auth-subtitle">企业官网级首页 · 专业SaaS后台 · 实时风险分析</p>', unsafe_allow_html=True)
 
     # 忘记密码弹窗状态
     if "show_forgot_password" not in st.session_state:
@@ -3035,416 +2815,130 @@ def _matplotlib_style(ax, title: str | None = None, xlabel: str | None = None, y
             ax.spines[side].set_linewidth(1.0)
         ax.tick_params(colors="#475467", labelsize=10)
         if title is not None:
-            ax.set_title(title, fontsize=14, fontweight="bold", color="#2B2F33")
+            ax.set_title(title, fontsize=14, fontweight="bold", color="#172033")
         if xlabel is not None:
-            ax.set_xlabel(xlabel, fontsize=11, color="#666666")
+            ax.set_xlabel(xlabel, fontsize=11, color="#344054")
         if ylabel is not None:
-            ax.set_ylabel(ylabel, fontsize=11, color="#666666")
+            ax.set_ylabel(ylabel, fontsize=11, color="#344054")
     except Exception:
         pass
-
-
-# --- UI v33：顶部导航 + 企业官网首页 + 产业数据风内页 ---
-_APP_DIR = os.path.dirname(os.path.abspath(__file__))
-HERO_BANNER_PATH = os.path.join(_APP_DIR, "assets", "hero_banner.png")
-
-PAGE_SLUGS: Dict[str, str] = {
-    "首页": "home",
-    "价格行情": "price",
-    "价差走势": "basis",
-    "套保计算": "hedge",
-    "多情景分析": "scenario",
-    "期权保险": "option",
-    "分析报告": "report",
-    "风险敞口": "exposure",
-    "库存管理": "inventory",
-    "利润管理": "profit",
-    "分析历史": "history",
-    "策略管理": "strategy",
-    "账号设置": "settings",
-}
-SLUG_TO_PAGE: Dict[str, str] = {v: k for k, v in PAGE_SLUGS.items()}
-
-PAGES_ALL: List[str] = [
-    "首页",
-    "价格行情",
-    "风险敞口",
-    "套保计算",
-    "价差走势",
-    "库存管理",
-    "利润管理",
-    "期权保险",
-    "多情景分析",
-    "分析报告",
-    "分析历史",
-    "策略管理",
-    "账号设置",
-]
-
-NAV_PRIMARY: List[tuple[str, str]] = [
-    ("首页", "首页"),
-    ("价格行情", "价格行情"),
-    ("价差走势", "价差走势"),
-    ("套保计算", "套保计算"),
-    ("多情景分析", "多情景分析"),
-    ("期权计算", "期权保险"),
-    ("分析报告", "分析报告"),
-]
-
-NAV_MORE: List[tuple[str, str]] = [
-    ("风险敞口", "风险敞口"),
-    ("库存管理", "库存管理"),
-    ("利润管理", "利润管理"),
-    ("分析历史", "分析历史"),
-    ("策略管理", "策略管理"),
-    ("账号设置", "账号设置"),
-]
-
-PAGE_INTRO: Dict[str, tuple[str, str]] = {
-    "套保计算": ("套保计算器", "输入成本、库存与套保比例，输出盈亏平衡、保证金与多情景对比。"),
-    "价格行情": ("碳酸锂实时价格行情", "展示 LC 合约日度收盘价、均线与波动统计，可切换周期与合约。"),
-    "价差走势": ("期货-市场参考价差走势", "支持市场现货价、用户自定义与真实采购成本三种口径的基差分析。"),
-    "库存管理": ("库存管理", "入库/出库台账、移动加权均价，并与套保、利润模块联动。"),
-    "利润管理": ("利润管理", "基于销售记录与库存成本台账输出毛利，并可结合套保形成综合利润视角。"),
-    "期权保险": ("期权计算", "采用 Black–Scholes 估算期权保费，对比不买保险、期货与期权成本。"),
-    "风险敞口": ("风险敞口量化", "由采购、库存与已锁定量估算净敞口、风险方向与影响。"),
-    "多情景分析": ("多情景分析", "在假设价格变动下对比套保前后盈亏，并支持历史极端日压力测试。"),
-    "分析报告": ("分析报告", "汇总价差、套保、情景等结果，支持导出 TXT/PDF/Word。"),
-    "分析历史": ("分析历史记录", "查看云端保存的分析记录，支持删除与重新套用参数。"),
-    "策略管理": ("策略管理与回溯", "查看在套保计算中保存的方案，并基于真实期货收盘价做回溯。"),
-    "账号设置": ("账号设置", "账户信息、密码、偏好与数据导出。"),
-}
-
-
-def _hero_banner_data_uri() -> str:
-    try:
-        if os.path.isfile(HERO_BANNER_PATH):
-            with open(HERO_BANNER_PATH, "rb") as f:
-                return "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
-    except Exception:
-        pass
-    return ""
-
-
-def _qp_get(name: str):
-    try:
-        return st.query_params.get(name)
-    except Exception:
-        try:
-            qp = st.experimental_get_query_params()
-            v = qp.get(name, [None])
-            return v[0] if v else None
-        except Exception:
-            return None
-
-
-def _qp_set(name: str, value: str) -> None:
-    try:
-        st.query_params[name] = value
-    except Exception:
-        try:
-            st.experimental_set_query_params(**{name: value})
-        except Exception:
-            pass
-
-
-def _sync_nav_from_url() -> None:
-    slug = _qp_get("p")
-    if slug and slug in SLUG_TO_PAGE:
-        target = SLUG_TO_PAGE[slug]
-        if st.session_state.get("current_page") != target:
-            st.session_state.current_page = target
-
-
-def _navigate_to_page(page_name: str) -> None:
-    if page_name not in PAGES_ALL:
-        return
-    st.session_state.current_page = page_name
-    slug = PAGE_SLUGS.get(page_name, "home")
-    _qp_set("p", slug)
-    st.rerun()
-
-
-def render_live_price_strip(analyzer) -> None:
-    st.markdown('<div class="live-price-strip">', unsafe_allow_html=True)
-    try:
-        price_data = analyzer.fetch_real_time_data(force_refresh=st.session_state.force_refresh)
-        if st.session_state.force_refresh:
-            st.session_state.force_refresh = False
-        if price_data is not None and not price_data.empty:
-            latest_price = price_data["收盘价"].iloc[-1]
-            latest_date = price_data["日期"].iloc[-1]
-            price_change = price_data["涨跌幅"].iloc[-1] if "涨跌幅" in price_data.columns else 0
-            delta_color = "normal" if price_change >= 0 else "inverse"
-            c1, c2, c3, c4 = st.columns([1.2, 1, 1, 2])
-            with c1:
-                st.metric("碳酸锂期货（最新收盘）", f"{latest_price:,.0f} 元/吨")
-            with c2:
-                st.metric("日涨跌幅", f"{price_change:+.2f}%", delta_color=delta_color)
-            with c3:
-                st.metric("数据日期", _fmt_dt(latest_date))
-            with c4:
-                st.caption("数据来自行情接口缓存；可在各页使用「刷新」强制更新。")
-        else:
-            st.warning("暂无实时价格数据")
-    except Exception:
-        st.warning("无法获取实时价格")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-
-def render_saas_page_head(title: str, subtitle: str) -> None:
-    safe_t = str(title).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    safe_s = str(subtitle).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    st.markdown(
-        f"""
-        <div class="saas-page-head">
-            <h1 class="saas-page-title">{safe_t}</h1>
-            <p class="saas-page-sub">{safe_s}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def render_top_navigation_bar(analyzer) -> None:
-    _sync_nav_from_url()
-    if st.session_state.current_page not in PAGES_ALL:
-        st.session_state.current_page = "首页"
-
-    user_info = st.session_state.user_info or {}
-    username = user_info.get("username", "用户")
-    cur = st.session_state.current_page
-
-    nav_links_html = []
-    for label, page_key in NAV_PRIMARY:
-        slug = PAGE_SLUGS.get(page_key, "home")
-        active = "is-active" if cur == page_key else ""
-        nav_links_html.append(
-            f'<a class="topnav-link {active}" href="?p={slug}">{label}</a>'
-        )
-
-    more_links = []
-    for label, page_key in NAV_MORE:
-        slug = PAGE_SLUGS.get(page_key, "home")
-        active = "is-active" if cur == page_key else ""
-        more_links.append(f'<a class="topnav-sublink {active}" href="?p={slug}">{label}</a>')
-
-    st.markdown(
-        f"""
-        <div class="topnav-shell">
-            <div class="topnav-inner">
-                <div class="topnav-brand">
-                    <div class="brand-name">熵合科技</div>
-                    <div class="brand-sub">新能源风险管理 SaaS</div>
-                </div>
-                <div class="topnav-links">
-                    {"".join(nav_links_html)}
-                </div>
-                <div class="topnav-user">{username} ｜ {datetime.now().strftime('%Y-%m-%d')}</div>
-            </div>
-            <div class="topnav-subrow">
-                <span class="topnav-sub-label">更多功能</span>
-                {"".join(more_links)}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 def render_main_app(analyzer):
-    """渲染主应用界面（顶部横向导航 + 内容区）"""
-    _sync_nav_from_url()
-    if st.session_state.current_page not in PAGES_ALL:
+    """渲染主应用界面（顶部横向导航版）"""
+    page_map = {
+        "首页": render_home_page,
+        "价格行情": render_price_page,
+        "风险敞口": render_exposure_page,
+        "套保计算": render_hedge_page,
+        "价差走势": render_basis_page,
+        "库存管理": render_inventory_page,
+        "利润管理": render_profit_page,
+        "期权保险": render_option_page,
+        "期权计算": render_option_page,
+        "多情景分析": render_scenario_page,
+        "分析报告": render_report_page,
+        "分析历史": render_history_page,
+        "策略管理": render_strategy_page,
+        "账号设置": render_settings_page,
+    }
+
+    if st.session_state.current_page not in page_map:
         st.session_state.current_page = "首页"
 
-    render_top_navigation_bar(analyzer)
-
-    if st.session_state.current_page != "首页":
-        render_live_price_strip(analyzer)
-
-    intro = PAGE_INTRO.get(st.session_state.current_page)
-    if intro and st.session_state.current_page != "首页":
-        render_saas_page_head(intro[0], intro[1])
-
-    if st.session_state.current_page == "首页":
-        render_home_page(analyzer)
-    elif st.session_state.current_page == "套保计算":
-        render_hedge_page(analyzer)
-    elif st.session_state.current_page == "价差走势":
-        render_basis_page(analyzer)
-    elif st.session_state.current_page == "库存管理":
-        render_inventory_page(analyzer)
-    elif st.session_state.current_page == "利润管理":
-        render_profit_page(analyzer)
-    elif st.session_state.current_page == "期权保险":
-        render_option_page(analyzer)
-    elif st.session_state.current_page == "风险敞口":
-        render_exposure_page(analyzer)
-    elif st.session_state.current_page == "多情景分析":
-        render_scenario_page(analyzer)
-    elif st.session_state.current_page == "价格行情":
-        render_price_page(analyzer)
-    elif st.session_state.current_page == "分析报告":
-        render_report_page(analyzer)
-    elif st.session_state.current_page == "分析历史":
-        render_history_page(analyzer)
-    elif st.session_state.current_page == "策略管理":
-        render_strategy_page(analyzer)
-    elif st.session_state.current_page == "账号设置":
-        render_settings_page(analyzer)
+    render_global_nav()
+    current_page = st.session_state.current_page
+    renderer = page_map.get(current_page, render_home_page)
+    if current_page == "期权计算":
+        st.session_state.current_page = "期权保险"
+    renderer(analyzer)
 
 
 def render_home_page(analyzer):
-    """渲染首页（企业官网结构 + 不改变各功能页面路由）"""
-    user_info = st.session_state.user_info or {}
-    username = user_info.get("username", "用户")
-    safe_user = str(username).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    b64 = _hero_banner_data_uri()
-    bg = f"background-image:url({b64});" if b64 else "background:linear-gradient(135deg,#3d4f63,#1f2a36);"
+    """渲染首页（官网风重构版）"""
+    banner_uri = _to_data_uri(BANNER_IMAGE_PATH)
+    ref_uri = _to_data_uri(HOME_REFERENCE_IMAGE_PATH)
 
     st.markdown(
         f"""
-        <div class="corp-hero">
-            <div class="corp-hero-bg" style="{bg}"></div>
-            <div class="corp-hero-dim"></div>
-            <div class="corp-hero-grad"></div>
-            <div class="corp-hero-blur"></div>
-            <div class="corp-hero-inner">
-                <div style="font-size:0.88rem;color:rgba(255,255,255,0.82);margin-bottom:0.5rem;">欢迎，{safe_user}</div>
-                <h1>新能源企业风险管理平台</h1>
-                <p class="sub">面向碳酸锂产业链企业的一体化数字平台</p>
+        <div class='hero-card'>
+            <div class='hero-banner' style='background-image:url("{banner_uri}");'>
+                <div class='hero-content'>
+                    <div class='hero-kicker'>Entropy Harmony Technology</div>
+                    <div class='hero-title'>新能源企业风险管理平台</div>
+                    <div class='hero-desc'>
+                        面向碳酸锂产业链企业的一体化数字平台。围绕价格波动、基差风险、套期保值与压力测试，
+                        提供从市场监测到策略评估、从经营分析到管理报告输出的一站式风险管理支持。
+                    </div>
+                    <div class='hero-action-tip'>企业官网级首页风格 + 产业数据平台化内页视觉</div>
+                </div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    h1, h2 = st.columns(2)
-    with h1:
-        if st.button("进入系统", type="primary", use_container_width=True, key="home_btn_enter"):
-            _navigate_to_page("价格行情")
-    with h2:
-        if st.button("查看功能", use_container_width=True, key="home_btn_features"):
-            st.session_state["_home_jump_features"] = True
+    cta1, cta2, _ = st.columns([1.05, 1.05, 4.2])
+    with cta1:
+        if st.button("进入系统", type="primary", use_container_width=True, key="home_enter_system"):
+            st.session_state.current_page = "价格行情"
+            st.rerun()
+    with cta2:
+        if st.button("查看功能", use_container_width=True, key="home_view_features"):
+            st.session_state.current_page = "套保计算"
             st.rerun()
 
-    if st.session_state.pop("_home_jump_features", False):
-        st.info("请向下浏览「核心能力」与「应用场景」模块。")
-
-    st.markdown(
-        """
-        <div id="corp-profile" class="corp-section">
-            <h2>平台简介</h2>
-            <div class="en">Platform Profile</div>
-            <p>熵合科技新能源企业风险管理平台，面向碳酸锂产业链企业在原材料价格波动背景下的经营风险管理需求而设计。平台基于真实市场数据与动态风险建模方法，构建价格监测、基差分析、套期保值测算、多情景压力测试及策略评估的一体化分析体系。</p>
-            <p>通过对期货与市场参考价格的联动分析，平台帮助企业识别价格风险敞口，评估不同套保策略下的盈亏表现与风险水平，从而提升企业在复杂市场环境中的决策能力与风险控制水平。</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    caps = [
-        ("价格行情监测", "主力合约与多周期价格、统计与图表。"),
-        ("基差动态分析", "期货相对现货/采购成本的价差跟踪。"),
-        ("套保策略测算", "保证金、盈亏平衡与情景对比。"),
-        ("多情景压力测试", "假设涨跌与历史极端日压力情景。"),
-        ("期权策略支持", "保费估算与成本曲线对比。"),
-        ("风险报告输出", "汇总分析结论并导出报告。"),
-    ]
-    cap_cells = "".join(
-        f'<div class="corp-card"><div class="t">{t}</div><div class="d">{d}</div></div>'
-        for t, d in caps
-    )
+    st.markdown("<div class='section-kicker'>Platform Profile</div><div class='section-title'>平台简介 / Platform Profile</div>", unsafe_allow_html=True)
     st.markdown(
         f"""
-        <div id="corp-cap" class="corp-section">
-            <h2>核心能力</h2>
-            <div class="en">Core Capabilities</div>
-            <div class="corp-grid">{cap_cells}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    scen = [
-        ("原材料采购风险管理", "跟踪价格与基差，评估采购敞口。"),
-        ("存货价格波动控制", "结合库存台账量化跌价风险。"),
-        ("套保策略决策支持", "对比套保比例与保证金占用。"),
-        ("管理层风险报告输出", "一页式结论与导出。"),
-    ]
-    scen_cells = "".join(
-        f'<div class="corp-card"><div class="t">{t}</div><div class="d">{d}</div></div>'
-        for t, d in scen
-    )
-    st.markdown(
-        f"""
-        <div class="corp-section">
-            <h2>应用场景</h2>
-            <div class="en">Application Scenarios</div>
-            <div class="corp-grid">{scen_cells}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-        <div class="corp-section">
-            <h2>风险管理流程</h2>
-            <div class="en">Risk Management Workflow</div>
-            <div class="corp-flow">
-                <span>市场数据接入</span><i>→</i>
-                <span>风险敞口识别</span><i>→</i>
-                <span>基差与价格分析</span><i>→</i>
-                <span>套保策略测算</span><i>→</i>
-                <span>风险评估与报告输出</span>
+        <div class='intro-grid'>
+            <div class='intro-card'>
+                <p>熵合科技新能源企业风险管理平台，面向碳酸锂产业链企业在原材料价格波动背景下的经营风险管理需求而设计。平台基于真实市场数据与动态风险建模方法，构建价格监测、基差分析、套期保值测算、多情景压力测试及策略评估的一体化分析体系。</p>
+                <p>通过对期货与市场参考价格的联动分析，平台帮助企业识别价格风险敞口，评估不同套保策略下的盈亏表现与风险水平，从而提升企业在复杂市场环境中的决策能力与风险控制水平。</p>
+            </div>
+            <div class='intro-image-card'>
+                <img src="{ref_uri}" alt="平台视觉参考" />
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown(
-        """
-        <div class="corp-section">
-            <h2>快捷入口</h2>
-            <div class="en">Quick Access</div>
-            <p style="margin-bottom:0.5rem">与顶部导航一致，可从首页一键进入常用模块。</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    q1, q2, q3 = st.columns(3)
-    with q1:
-        if st.button("套保计算", use_container_width=True, key="home_q_hedge"):
-            _navigate_to_page("套保计算")
-    with q2:
-        if st.button("价格行情", use_container_width=True, key="home_q_price"):
-            _navigate_to_page("价格行情")
-    with q3:
-        if st.button("分析历史", use_container_width=True, key="home_q_hist"):
-            _navigate_to_page("分析历史")
+    capabilities = [
+        ("01", "价格行情监测", "实时查看碳酸锂期货价格走势、涨跌幅、区间统计与历史对比，为后续风险测算提供统一市场基准。"),
+        ("02", "基差动态分析", "围绕期货与市场参考价的联动关系，展示价差结构、变化区间与当前偏离程度。"),
+        ("03", "套保策略测算", "结合库存、成本、套保比例与保证金参数，形成经营层可理解的套保效果测算。"),
+        ("04", "多情景压力测试", "对上涨、下跌、平稳及自定义波动情景进行横向比较，识别极端条件下的盈亏表现。"),
+        ("05", "期权策略支持", "为锁定采购上限或销售下限提供期权成本测算与情景比较支持。"),
+        ("06", "风险报告输出", "自动汇总关键市场信息、风险敞口、情景结果与建议，便于路演展示和管理层汇报。"),
+    ]
+    st.markdown("<div class='section-kicker'>Core Capability</div><div class='section-title'>核心能力</div><div class='section-subtle'>保留原有功能逻辑，仅对视觉结构、展示层次和页面气质进行整体升级。</div>", unsafe_allow_html=True)
+    cards_html = "".join([f"<div class='cap-card'><div class='cap-index'>{i}</div><div class='cap-title'>{t}</div><div class='cap-text'>{d}</div></div>" for i,t,d in capabilities])
+    st.markdown(f"<div class='cap-grid'>{cards_html}</div>", unsafe_allow_html=True)
 
-    with st.expander("功能说明（与原系统介绍一致，可展开查看）", expanded=False):
-        st.markdown("""
-**套保计算**：盈亏平衡、情景模拟、保证金与风险提示；参数含成本价、存货量、套保比例与保证金比例等。
+    scenes = [
+        ("01", "原材料采购风险管理", "用于识别采购阶段面临的上涨风险与采购成本不确定性。"),
+        ("02", "存货价格波动控制", "针对现有库存的价格下跌风险，支持风险对冲与保值决策。"),
+        ("03", "套保策略决策支持", "为交易部门与经营管理层提供定量化的方案对比与执行依据。"),
+        ("04", "管理层风险报告输出", "支持形成结构化、可展示、可路演的阶段性风险分析结果。"),
+    ]
+    st.markdown("<div class='section-kicker'>Application Scenario</div><div class='section-title'>应用场景</div>", unsafe_allow_html=True)
+    scene_html = "".join([f"<div class='scene-card'><div class='scene-index'>{i}</div><div class='scene-title'>{t}</div><div class='scene-text'>{d}</div></div>" for i,t,d in scenes])
+    st.markdown(f"<div class='scene-grid'>{scene_html}</div>", unsafe_allow_html=True)
 
-**价格行情**：LC 主力及月合约日度数据、均线、统计与刷新缓存。
-
-**云端能力**：分析历史与偏好在 Supabase 存储（若已配置）；支持邮箱找回与数据导出。
-
-**扩展模块**：价差走势、期权测算、风险敞口、多情景分析、分析报告与策略回溯。
-        """)
+    process_steps = ["市场数据接入", "风险敞口识别", "基差与价格分析", "套保策略测算", "风险评估与报告输出"]
+    st.markdown("<div class='section-kicker'>Workflow</div><div class='section-title'>风险管理流程</div>", unsafe_allow_html=True)
+    process_html = "".join([f"<div class='process-step'><div class='process-no'>{idx}</div><div class='process-title'>{name}</div></div>" for idx, name in enumerate(process_steps, start=1)])
+    st.markdown(f"<div class='process-wrap'>{process_html}</div>", unsafe_allow_html=True)
 
     st.markdown(
         """
-        <div class="corp-footer">
-            <div><strong>熵合科技--基于动态风险建模的新能源企业风险管理 SaaS 平台</strong></div>
-            <div>大连熵合科技有限公司</div>
-            <div>电话：15773359917</div>
-            <div>邮箱：<a href="mailto:fyj05818188@163.com">fyj05818188@163.com</a></div>
+        <div class='home-footer'>
+            <div class='home-footer-title'>项目信息</div>
+            <p>项目名称：熵合科技--基于动态风险建模的新能源企业风险管理SaaS平台</p>
+            <p>公司名称：大连熵合科技有限公司</p>
+            <p>电话：15773359917</p>
+            <p>邮箱：fyj05818188@163.com</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -3453,7 +2947,7 @@ def render_home_page(analyzer):
 
 def render_hedge_page(analyzer):
     """渲染套保计算页面"""
-    # 标题与说明由 render_main_app 中的 render_saas_page_head 统一展示
+    render_standard_page_header("套保计算", "结合库存、成本与套保比例进行策略测算，输出指标卡、情景图表与分析建议。")
     
     # 获取用户设置（如果有）
     user_settings = {}
@@ -3761,65 +3255,6 @@ def render_hedge_page(analyzer):
                 - 计算套保后的盈亏变化
                 - 提供风险管理建议
                 """)
-    
-    # 侧边栏信息
-
-    with st.sidebar:
-        st.markdown("### 实时市场概况")
-        
-        # 获取最新价格数据
-        price_data = analyzer.fetch_real_time_data(force_refresh=st.session_state.force_refresh)
-        if st.session_state.force_refresh:
-            st.session_state.force_refresh = False
-        
-        if not price_data.empty:
-            latest_price = price_data['收盘价'].iloc[-1]
-            latest_date = price_data['日期'].iloc[-1]
-            
-            if '涨跌幅' in price_data.columns:
-                price_change = price_data['涨跌幅'].iloc[-1]
-            else:
-                price_change = 0
-            
-            delta_color = "normal" if price_change >= 0 else "inverse"
-            st.metric(
-                label="碳酸锂期货价格",
-                value=f"{latest_price:,.0f}",
-                delta=f"{price_change:.2f}%" if price_change != 0 else None,
-                delta_color=delta_color
-            )
-            st.caption(f"更新时间：{latest_date.strftime('%Y-%m-%d')}")
-            
-            # 近期价格走势
-            st.markdown("#### 近期价格走势")
-            fig_small, ax_small = plt.subplots(figsize=(8, 3))
-            
-            recent_data = price_data.tail(30)
-            ax_small.plot(recent_data['日期'], recent_data['收盘价'], 'b-', linewidth=1.5)
-            ax_small.fill_between(recent_data['日期'], recent_data['收盘价'].min(), 
-                                 recent_data['收盘价'], alpha=0.1, color='blue')
-            _matplotlib_style(ax_small, '30日价格走势', None, None)
-            plt.xticks(rotation=45, fontsize=8)
-            plt.tight_layout()
-            st.pyplot(fig_small)
-            
-            # 市场统计
-            st.markdown("#### 市场统计")
-            col_stat1, col_stat2 = st.columns(2)
-            with col_stat1:
-                st.metric("30日最高", f"{recent_data['收盘价'].max():,.0f}")
-            with col_stat2:
-                st.metric("30日最低", f"{recent_data['收盘价'].min():,.0f}")
-        
-
-        st.markdown("### 使用提示")
-        st.markdown("""
-        1. **实时数据**：所有计算基于最新市场数据
-        2. **自动更新**：数据每30分钟自动缓存
-        3. **手动刷新**：可点击"刷新数据"按钮
-        4. **云端保存**：登录后自动保存分析历史
-        5. **风险提示**：计算结果仅供参考
-        """)
 
 
     st.markdown("---")
@@ -3951,7 +3386,7 @@ def render_hedge_page(analyzer):
 
 def render_price_page(analyzer):
     """渲染价格行情页面"""
-    # 页头由 render_saas_page_head 统一展示
+    render_standard_page_header("价格行情", "围绕碳酸锂期货主力与月合约，展示价格走势、统计指标、详细表格与导出能力。")
     
     # 数据控制栏
     col_control1, col_control2, col_control3, col_control4 = st.columns([2, 2, 1, 1])
@@ -4206,7 +3641,7 @@ def _series_last_bool(df: 'pd.DataFrame', col: str, default: bool = False) -> bo
 
 def render_basis_page(analyzer):
     """渲染多基准价差页面。"""
-    # 页头由 render_saas_page_head 统一展示
+    render_standard_page_header("价差走势", "支持市场现货价、用户自定义、真实采购成本三种口径，统一展示基差指标、对比表格与逐日明细。")
 
     # 先放一行紧凑的筛选器，避免右侧表单把整页顶部撑出大空白
     filter_col1, filter_col2 = st.columns([1, 1])
@@ -4453,7 +3888,7 @@ def render_basis_page(analyzer):
 
 def render_inventory_page(analyzer):
     """库存管理（MVP）"""
-    # 页头由 render_saas_page_head 统一展示
+    render_standard_page_header("库存管理", "记录入库与出库台账，自动汇总库存水平与加权成本，并与套保、利润模块形成联动。")
 
     user_info = st.session_state.get("user_info") or {}
     user_id = (
@@ -4588,7 +4023,7 @@ def render_inventory_page(analyzer):
 
 def render_profit_page(analyzer):
     """利润管理（MVP）"""
-    # 页头由 render_saas_page_head 统一展示
+    render_standard_page_header("利润管理", "基于销售记录与库存成本台账输出毛利结果，并支持与套保估算结果形成综合利润视图。")
 
     user_info = st.session_state.get("user_info") or {}
     user_id = (
@@ -4694,7 +4129,7 @@ def render_profit_page(analyzer):
 
 def render_option_page(analyzer):
     """渲染期权保险计算页面"""
-    # 页头由 render_saas_page_head 统一展示
+    render_standard_page_header("期权计算", "以采购上限或销售下限为目标，测算期权保费与不同风险管理工具下的情景差异。")
 
     col_left, col_right = st.columns([1, 2])
 
@@ -4780,7 +4215,7 @@ def render_option_page(analyzer):
 
 def render_exposure_page(analyzer):
     """渲染风险敞口量化页面"""
-    # 页头由 render_saas_page_head 统一展示
+    render_standard_page_header("风险敞口", "量化未来采购、现有库存与已锁定数量之间的风险暴露，为后续套保与期权决策提供依据。")
 
     col_left, col_right = st.columns([1, 2])
     with col_left:
@@ -4831,7 +4266,7 @@ def render_exposure_page(analyzer):
         components = [future_purchase, inventory, locked_sales]
         labels = ["未来采购", "现有库存", "已锁定"]
         ax.pie(components, labels=labels, autopct="%1.1f%%", startangle=90)
-        ax.set_title("敞口构成", fontsize=13, fontweight="bold", color="#2B2F33")
+        ax.set_title("敞口构成", fontsize=13, fontweight="bold", color="#172033")
         st.pyplot(fig)
 
         st.markdown("#### 策略建议")
@@ -4850,7 +4285,7 @@ def render_exposure_page(analyzer):
 
 def render_scenario_page(analyzer):
     """渲染多情景分析页面"""
-    # 页头由 render_saas_page_head 统一展示
+    render_standard_page_header("多情景分析", "对不同价格波动场景进行横向比较，快速评估不套保与套保后的盈亏敏感性。")
 
     default_params = st.session_state.get("hedge_results", {}).get("params", {})
     cost_price = st.number_input(
@@ -4962,7 +4397,7 @@ def render_scenario_page(analyzer):
 
 def render_report_page(analyzer):
     """渲染分析报告页面（v45 稳定版）"""
-    # 页头由 render_saas_page_head 统一展示
+    render_standard_page_header("分析报告", "整合市场概况、价差信息、风险敞口与情景结果，输出适合展示与汇报的结构化分析内容。")
 
     basis_data = st.session_state.get("basis_data")
     if not basis_data:
@@ -5134,7 +4569,7 @@ def render_report_page(analyzer):
 
 def render_history_page(analyzer):
     """渲染分析历史页面"""
-    # 页头由 render_saas_page_head 统一展示
+    render_standard_page_header("分析历史", "集中查看云端保存的分析记录，便于复盘不同时间点的参数、结果与策略选择。")
     
     # 获取用户历史记录
     with st.spinner("正在加载分析历史..."):
@@ -5275,7 +4710,7 @@ def render_history_page(analyzer):
 
 def render_strategy_page(analyzer):
     """策略管理与回溯（轻量版，适合竞赛演示与早期试点）"""
-    # 页头由 render_saas_page_head 统一展示
+    render_standard_page_header("策略管理", "记录套保计算页面保存的策略快照，并基于真实历史期货收盘价进行非模拟回溯分析。")
 
     strategies = st.session_state.get("saved_strategies", [])
     if not strategies:
@@ -5345,7 +4780,7 @@ def render_strategy_page(analyzer):
 
 def render_settings_page(analyzer):
     """渲染账号设置页面"""
-    # 页头由 render_saas_page_head 统一展示
+    render_standard_page_header("账号设置", "管理账户信息、密码、偏好配置与数据导出，保持系统使用体验与数据安全的一致性。")
     
     user_info = st.session_state.user_info
     
@@ -5581,7 +5016,6 @@ if __name__ == "__main__":
     # 创建必要的目录
     os.makedirs('data', exist_ok=True)
     os.makedirs('charts', exist_ok=True)
-    os.makedirs(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'assets'), exist_ok=True)
     
     # 运行应用
     try:
