@@ -2419,12 +2419,42 @@ def main():
     h1, h2, h3, h4, p, label, div, span {
         color: var(--text);
     }
+    @keyframes ehFadeUp {
+        from {opacity: 0; transform: translateY(16px);} 
+        to {opacity: 1; transform: translateY(0);} 
+    }
+    @keyframes ehFloat {
+        0%,100% {transform: translateY(0);} 
+        50% {transform: translateY(-4px);} 
+    }
     .main-header {
-        font-size: 2.5rem; font-weight: 800; text-align: center; margin: 1rem 0 .35rem 0; letter-spacing: -0.02em;
+        font-size: 3.25rem; font-weight: 900; text-align: center; margin: 0 0 .55rem 0; letter-spacing: -0.04em; line-height: 1.08;
+        animation: ehFadeUp .75s ease both;
     }
     .auth-subtitle {
-        text-align:center; color:var(--muted); margin-bottom: 1.2rem;
+        text-align:center; color:rgba(255,255,255,.82); margin:0 auto 1.4rem auto; max-width: 760px; font-size: 1.08rem; line-height: 1.9;
+        animation: ehFadeUp .95s ease both;
     }
+    .auth-shell {
+        display:grid; grid-template-columns: 1.15fr .95fr; gap: 26px; align-items: stretch; margin-top: 1.4rem;
+    }
+    .auth-brand-card, .auth-form-card {
+        background: rgba(255,255,255,0.90); border:1px solid rgba(255,255,255,0.52); border-radius: 24px; box-shadow: 0 22px 60px rgba(18,22,28,0.16);
+        backdrop-filter: blur(14px); overflow:hidden; position:relative;
+    }
+    .auth-brand-card {padding: 42px 40px 36px 40px; animation: ehFadeUp .9s ease both;}
+    .auth-form-card {padding: 22px 24px 18px 24px; animation: ehFadeUp 1.05s ease both;}
+    .auth-brand-kicker {font-size:.9rem; color: var(--gold-deep); text-transform: uppercase; letter-spacing: .16em; font-weight: 900;}
+    .auth-brand-title {font-size: 3rem; font-weight: 900; line-height: 1.1; letter-spacing: -0.04em; margin: 1.1rem 0 .8rem 0;}
+    .auth-brand-desc {color: var(--muted); line-height: 1.95; font-size: 1rem; max-width: 590px;}
+    .auth-brand-tags {display:flex; flex-wrap:wrap; gap: 10px; margin-top: 1.2rem;}
+    .auth-brand-tags span {display:inline-flex; align-items:center; border-radius:999px; padding: 8px 14px; background: rgba(201,169,107,.12); border:1px solid rgba(201,169,107,.20); color: var(--gold-deep); font-weight: 700; font-size: .86rem;}
+    .auth-brand-grid {display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; margin-top: 1.4rem;}
+    .auth-brand-grid div {background: rgba(255,255,255,.82); border:1px solid rgba(201,169,107,.16); border-radius: 16px; padding: 16px 14px; box-shadow: var(--shadow-soft); animation: ehFloat 4.2s ease-in-out infinite;}
+    .auth-brand-grid div:nth-child(2) {animation-delay: .4s;} .auth-brand-grid div:nth-child(3) {animation-delay: .8s;}
+    .auth-brand-grid strong {display:block; font-size: 1.25rem; color: var(--text);} .auth-brand-grid span {display:block; color: var(--muted); margin-top: 4px; font-size: .82rem; line-height:1.5;}
+    .auth-form-title {font-size: 1.55rem; font-weight: 900; letter-spacing: -.02em; margin-bottom: .25rem;}
+    .auth-form-text {color: var(--muted); margin-bottom: 1rem; line-height: 1.8;}
     .eh-navbar {
         background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.93) 100%);
         border: 1px solid rgba(201,169,107,0.16);
@@ -2454,6 +2484,28 @@ def main():
     div[data-testid="stPopoverContent"] {border-radius: 12px !important; border: 1px solid var(--line) !important; box-shadow: 0 12px 30px rgba(0,0,0,0.10) !important;}
     div[data-testid="stPopoverContent"] button[kind="secondary"] {justify-content: flex-start !important; text-align: left !important; border-radius: 10px !important; background: #fff !important;}
     div[data-testid="stPopoverContent"] button[kind="secondary"]:hover {background: rgba(201,169,107,0.08) !important; border-color: rgba(201,169,107,0.22) !important;}
+
+    .eh-navbar, .hero-banner, .intro-card, .cap-card, .scene-card, .process-step, .home-footer, .page-shell {
+        animation: ehFadeUp .68s ease both;
+    }
+    .cap-card:nth-child(2), .scene-card:nth-child(2), .process-step:nth-child(2) {animation-delay:.06s;}
+    .cap-card:nth-child(3), .scene-card:nth-child(3), .process-step:nth-child(3) {animation-delay:.12s;}
+    .cap-card:nth-child(4), .scene-card:nth-child(4), .process-step:nth-child(4) {animation-delay:.18s;}
+    .cap-card:nth-child(5), .scene-card:nth-child(5), .process-step:nth-child(5) {animation-delay:.24s;}
+    .cap-card:nth-child(6) {animation-delay:.30s;}
+    [data-testid="stMetric"] {
+        position:relative; overflow:hidden; border-radius:18px !important; box-shadow: 0 14px 36px rgba(26,31,38,.08) !important;
+        background: linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(252,249,242,.94) 100%) !important;
+        transition: transform .18s ease, box-shadow .18s ease !important;
+    }
+    [data-testid="stMetric"]:hover {transform: translateY(-3px); box-shadow: 0 18px 44px rgba(26,31,38,.12) !important;}
+    [data-testid="stMetric"]::before {content:''; position:absolute; left:0; top:0; bottom:0; width:4px; background: linear-gradient(180deg, var(--gold), rgba(201,169,107,0.18));}
+    [data-testid="stMetricLabel"] {font-size:.86rem !important; letter-spacing:.04em !important; text-transform: uppercase !important;}
+    [data-testid="stMetricValue"] {font-size:1.7rem !important; font-weight:900 !important; letter-spacing:-.03em !important;}
+    [data-testid="stMetricDelta"] {font-weight:700 !important;}
+    .chart-card {background: linear-gradient(180deg, rgba(255,255,255,.98) 0%, rgba(251,249,244,.96) 100%); border:1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); padding: 18px 18px 12px 18px; margin: .55rem 0 1rem 0;}
+    .chart-card-title {font-size: 1.08rem; font-weight: 800; margin-bottom: 6px;}
+    .chart-card-subtitle {font-size: .9rem; color: var(--muted); margin-bottom: 8px;}
 
     div[role="radiogroup"] {gap: .45rem;}
     div[role="radiogroup"] label {
@@ -2587,12 +2639,16 @@ def main():
 
     @media (max-width: 1100px) {
         .eh-statusbar, .cap-grid, .scene-grid, .process-wrap, .intro-grid {grid-template-columns: 1fr 1fr !important;}
+        .auth-shell {grid-template-columns: 1fr !important;}
         .hero-content {padding: 62px 36px;}
         .hero-title {font-size: 2.55rem;}
         .hero-floating-card {position:relative; right:auto; bottom:auto; width:auto; margin: 0 36px 36px 36px;}
     }
     @media (max-width: 760px) {
         .eh-navbar-inner, .intro-grid, .cap-grid, .scene-grid, .process-wrap, .eh-statusbar {grid-template-columns: 1fr !important; display:grid !important;}
+        .auth-brand-card, .auth-form-card {padding: 22px 18px !important;}
+        .auth-brand-title {font-size: 2.15rem !important;}
+        .auth-brand-grid {grid-template-columns: 1fr !important;}
         .hero-banner {min-height: 500px;}
         .hero-content {padding: 42px 22px;}
         .hero-title {font-size: 2.1rem;}
@@ -2631,20 +2687,49 @@ def main():
 # ============================================================================
 
 def render_auth_page(analyzer):
-    """渲染登录/注册页面"""
-    st.markdown('<h1 class="main-header">碳酸锂期货套保分析系统</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="auth-subtitle">企业官网级首页 · 专业SaaS后台 · 实时风险分析</p>', unsafe_allow_html=True)
+    """渲染登录/注册页面（v5：左品牌 + 右登录双栏）"""
+    st.markdown('<h1 class="main-header">新能源企业风险管理平台</h1>', unsafe_allow_html=True)
+    st.markdown('<p class="auth-subtitle">面向碳酸锂产业链企业的一体化数字平台</p>', unsafe_allow_html=True)
 
-    # 忘记密码弹窗状态
     if "show_forgot_password" not in st.session_state:
         st.session_state.show_forgot_password = False
 
-    tab_login, tab_register = st.tabs(["用户登录", "新用户注册"])
+    st.markdown("""
+    <div class='auth-shell'>
+        <div class='auth-brand-card'>
+            <div class='auth-brand-kicker'>Entropy Harmony Technology</div>
+            <div class='auth-brand-title'>以真实市场数据与动态风险建模，<br/>构建企业级新能源风险管理工作台</div>
+            <div class='auth-brand-desc'>
+                平台围绕价格行情、基差走势、套保测算、多情景压力测试、期权策略支持与分析报告输出，
+                为碳酸锂产业链企业提供从市场监测到经营决策的统一分析界面。
+            </div>
+            <div class='auth-brand-tags'>
+                <span>企业官网风首页</span>
+                <span>专业 SaaS 后台</span>
+                <span>实时风险分析</span>
+                <span>比赛 / 路演可展示</span>
+            </div>
+            <div class='auth-brand-grid'>
+                <div><strong>6</strong><span>核心功能模块</span></div>
+                <div><strong>4</strong><span>典型应用场景</span></div>
+                <div><strong>1</strong><span>一体化数字平台</span></div>
+            </div>
+        </div>
+        <div class='auth-form-card'>
+            <div class='auth-form-title'>用户登录</div>
+            <div class='auth-form-text'>支持用户名密码登录、邮箱验证码登录与新用户注册。</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-    with tab_login:
-        col_left, col_center, col_right = st.columns([1, 2, 1])
-        with col_center:
-            st.markdown("### 用户登录")
+    # actual interactive form placed under the right card area via columns, keeping layout stable in Streamlit
+    left, right = st.columns([1.15, 0.95], gap="large")
+    with left:
+        st.empty()
+    with right:
+        tab_login, tab_register = st.tabs(["用户登录", "新用户注册"])
+
+        with tab_login:
             login_tab_pwd, login_tab_email = st.tabs(["用户名/密码登录", "邮箱验证码登录"])
 
             with login_tab_pwd:
@@ -2707,19 +2792,9 @@ def render_auth_page(analyzer):
                             msg = result.get("message") if isinstance(result, dict) else str(result)
                             st.error(msg or "验证码登录失败")
 
-                st.caption("说明：验证码登录用于免密登录，邮箱需为已注册邮箱。")
+                st.caption("验证码登录用于免密登录，邮箱需为已注册邮箱。")
 
-            with st.expander("快速体验"):
-                st.markdown("""**演示账号**（如已在数据库中创建）：  
-- 用户名：demo_user  
-- 密码：demo123  
-
-也可以直接注册新账号，或使用邮箱验证码免密登录。""")
-
-    with tab_register:
-        col_left, col_center, col_right = st.columns([1, 2, 1])
-        with col_center:
-            st.markdown("### 新用户注册")
+        with tab_register:
             new_username = st.text_input("用户名", key="reg_username", placeholder="至少3个字符")
             new_email = st.text_input("邮箱", key="reg_email", placeholder="用于找回密码")
             new_password = st.text_input("密码", type="password", key="reg_password1", placeholder="至少6个字符")
@@ -2739,7 +2814,6 @@ def render_auth_page(analyzer):
                         msg = msg.get('message') or msg.get('msg') or str(msg)
                     if ok:
                         st.success(msg if isinstance(msg, str) else "注册成功")
-                        # 自动登录
                         with st.spinner("正在登录..."):
                             success, result = analyzer.auth.login(new_username, new_password)
                         if success:
@@ -2751,6 +2825,13 @@ def render_auth_page(analyzer):
                             st.info("注册成功，但自动登录失败，请回到“用户登录”手动登录。")
                     else:
                         st.error(msg if isinstance(msg, str) else "注册失败")
+
+        with st.expander("快速体验"):
+            st.markdown("""**演示账号**（如已在数据库中创建）：  
+- 用户名：demo_user  
+- 密码：demo123  
+
+也可以直接注册新账号，或使用邮箱验证码免密登录。""")
 
     if st.session_state.show_forgot_password:
         render_forgot_password(analyzer)
@@ -2875,24 +2956,33 @@ def _close_card():
 
 def _matplotlib_style(ax, title: str | None = None, xlabel: str | None = None, ylabel: str | None = None):
     try:
-        ax.set_facecolor("#FDFBF7")
-        ax.grid(True, alpha=0.18, linestyle="--", linewidth=0.8, color="#d7ccb6")
+        import matplotlib.pyplot as plt
+        ax.set_facecolor("#FCFAF6")
+        if hasattr(ax, 'figure') and ax.figure is not None:
+            ax.figure.patch.set_facecolor("#FCFAF6")
+        ax.grid(True, axis='y', alpha=0.22, linestyle='--', linewidth=0.8, color="#d4c6ab")
+        ax.grid(False, axis='x')
         for side in ["top", "right"]:
             ax.spines[side].set_visible(False)
         for side in ["left", "bottom"]:
-            ax.spines[side].set_color("#d8cdb8")
-            ax.spines[side].set_linewidth(1.0)
+            ax.spines[side].set_color("#d8ccb6")
+            ax.spines[side].set_linewidth(1.2)
         ax.tick_params(colors="#5b6470", labelsize=10)
         try:
             ax.title.set_fontweight('bold')
         except Exception:
             pass
         if title is not None:
-            ax.set_title(title, fontsize=16, fontweight="bold", color="#2B2F33", pad=12)
+            ax.set_title(title, fontsize=15, fontweight="bold", color="#2B2F33", pad=16, loc='left')
         if xlabel is not None:
-            ax.set_xlabel(xlabel, fontsize=11, color="#5b6470")
+            ax.set_xlabel(xlabel, fontsize=11, color="#5b6470", labelpad=10)
         if ylabel is not None:
-            ax.set_ylabel(ylabel, fontsize=11, color="#5b6470")
+            ax.set_ylabel(ylabel, fontsize=11, color="#5b6470", labelpad=10)
+        ax.axhline(0, color="#e6dcc8", linewidth=.8, zorder=0)
+        try:
+            plt.tight_layout()
+        except Exception:
+            pass
     except Exception:
         pass
 
