@@ -2720,100 +2720,82 @@ def main():
 def render_auth_page(analyzer):
     """渲染登录/注册页面（访客可先看首页；点登录/注册或访问功能页时进入）"""
     st.markdown('<h1 class="main-header">新能源企业风险管理平台</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="auth-subtitle">面向碳酸锂产业链企业的一体化数字平台</p>', unsafe_allow_html=True)
+    st.markdown('<p class="auth-subtitle" style="text-align:center;">面向碳酸锂产业链企业的一体化数字平台</p>', unsafe_allow_html=True)
 
     if "show_forgot_password" not in st.session_state:
         st.session_state.show_forgot_password = False
 
     wrap_left, wrap_center, wrap_right = st.columns([1, 1.25, 1])
     with wrap_center:
-        st.markdown("""
-        <div class='auth-form-card' style='max-width:760px;margin:0 auto;padding:28px 30px 22px 30px;'>
-            <div class='auth-form-title'>用户登录</div>
-            <div class='auth-form-text'>请登录后使用价格行情、价差走势、套保测算、多情景分析、期权计算与报告输出等完整功能。</div>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("<div class='auth-form-title' style='margin-top:18px;'>用户登录</div>", unsafe_allow_html=True)
+        st.markdown("<div class='auth-form-text' style='margin-bottom:12px;'>请登录后使用价格行情、价差走势、套保测算、多情景分析、期权计算与报告输出等完整功能。</div>", unsafe_allow_html=True)
 
-        top_a, top_b = st.columns([1,1])
-        with top_a:
-            if st.button("返回首页", use_container_width=True, key="auth_back_home_btn"):
-                st.session_state.current_page = "首页"
-                st.session_state.public_auth_requested = False
-                st.rerun()
-        with top_b:
-            if st.button("前往注册", use_container_width=True, key="auth_go_register_btn"):
-                st.session_state['_auth_default_tab'] = 'register'
+        tab_list = st.tabs(["用户名/密码登录", "邮箱验证码登录", "新用户注册"])
+        tab_login_pwd, tab_login_email, tab_register = tab_list[0], tab_list[1], tab_list[2]
 
-        default_register = st.session_state.pop('_auth_default_tab', None) == 'register'
-        tab_list = st.tabs(["用户登录", "新用户注册"])
-        tab_login, tab_register = tab_list[0], tab_list[1]
+        with tab_login_pwd:
+            username = st.text_input("用户名", placeholder="请输入用户名", key="login_username")
+            password = st.text_input("密码", type="password", placeholder="请输入密码", key="login_password")
 
-        with tab_login:
-            login_tab_pwd, login_tab_email = st.tabs(["用户名/密码登录", "邮箱验证码登录"])
-
-            with login_tab_pwd:
-                username = st.text_input("用户名", placeholder="请输入用户名", key="login_username")
-                password = st.text_input("密码", type="password", placeholder="请输入密码", key="login_password")
-
-                col_btn1, col_btn2 = st.columns(2)
-                with col_btn1:
-                    if st.button("登录", type="primary", use_container_width=True):
-                        with st.spinner("正在验证..."):
-                            success, result = analyzer.auth.login(username, password)
-                        if success:
-                            st.session_state.authenticated = True
-                            st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=username)
-                            st.session_state.user_id = st.session_state.user_info.get('user_id')
-                            st.session_state.public_auth_requested = False
-                            st.success("登录成功！")
-                            _log("login", {"username": username, "mode": "password"})
-                            st.rerun()
-                        else:
-                            msg = result.get("message") if isinstance(result, dict) else str(result)
-                            st.error(msg or "登录失败")
-
-                with col_btn2:
-                    if st.button("忘记密码", use_container_width=True):
-                        st.session_state.show_forgot_password = True
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                if st.button("登录", type="primary", use_container_width=True):
+                    with st.spinner("正在验证..."):
+                        success, result = analyzer.auth.login(username, password)
+                    if success:
+                        st.session_state.authenticated = True
+                        st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=username)
+                        st.session_state.user_id = st.session_state.user_info.get('user_id')
+                        st.session_state.public_auth_requested = False
+                        st.success("登录成功！")
+                        _log("login", {"username": username, "mode": "password"})
                         st.rerun()
+                    else:
+                        msg = result.get("message") if isinstance(result, dict) else str(result)
+                        st.error(msg or "登录失败")
 
-            with login_tab_email:
-                email = st.text_input("邮箱", placeholder="请输入注册邮箱", key="email_login_email")
-                email_code = st.text_input("邮箱验证码", placeholder="请输入邮箱验证码", key="email_login_code")
+            with col_btn2:
+                if st.button("忘记密码", use_container_width=True):
+                    st.session_state.show_forgot_password = True
+                    st.rerun()
 
-                email_login_wait = _cooldown_remaining("email_login_code_sent_at", 60)
-                email_login_btn_text = f"{email_login_wait}秒后重试" if email_login_wait > 0 else "发送验证码"
-                col_email_btn1, col_email_btn2 = st.columns(2)
-                with col_email_btn1:
-                    if st.button(email_login_btn_text, use_container_width=True, key="send_email_login_code_btn", disabled=email_login_wait > 0):
-                        with st.spinner("正在发送验证码..."):
-                            success, result = analyzer.auth.send_email_login_code(email)
-                        if success:
-                            _mark_code_sent("email_login_code_sent_at")
-                            st.session_state.email_login_last_email = email.strip()
-                            msg = result.get("message") if isinstance(result, dict) else str(result)
-                            st.success(msg or "验证码已发送，请查收邮箱。")
-                        else:
-                            msg = analyzer.auth._localize_auth_message(result.get("message") if isinstance(result, dict) else result)
-                            st.error(msg or "验证码发送失败")
+        with tab_login_email:
+            email = st.text_input("邮箱", placeholder="请输入注册邮箱", key="email_login_email")
+            email_code = st.text_input("邮箱验证码", placeholder="请输入邮箱验证码", key="email_login_code")
 
-                with col_email_btn2:
-                    if st.button("验证码登录", type="primary", use_container_width=True, key="email_code_login_btn"):
-                        with st.spinner("正在验证验证码..."):
-                            success, result = analyzer.auth.login_with_email_code(email, email_code)
-                        if success:
-                            st.session_state.authenticated = True
-                            st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=email)
-                            st.session_state.user_id = st.session_state.user_info.get('user_id')
-                            st.session_state.public_auth_requested = False
-                            st.success("登录成功！")
-                            _log("login", {"email": email, "mode": "email_code"})
-                            st.rerun()
-                        else:
-                            msg = result.get("message") if isinstance(result, dict) else str(result)
-                            st.error(msg or "验证码登录失败")
+            email_login_wait = _cooldown_remaining("email_login_code_sent_at", 60)
+            email_login_btn_text = f"{email_login_wait}秒后重试" if email_login_wait > 0 else "发送验证码"
+            col_email_btn1, col_email_btn2 = st.columns(2)
+            with col_email_btn1:
+                if st.button(email_login_btn_text, use_container_width=True, key="send_email_login_code_btn", disabled=email_login_wait > 0):
+                    with st.spinner("正在发送验证码..."):
+                        success, result = analyzer.auth.send_email_login_code(email)
+                    if success:
+                        _mark_code_sent("email_login_code_sent_at")
+                        st.session_state.email_login_last_email = email.strip()
+                        msg = result.get("message") if isinstance(result, dict) else str(result)
+                        st.success(msg or "验证码已发送，请查收邮箱。")
+                    else:
+                        msg = analyzer.auth._localize_auth_message(result.get("message") if isinstance(result, dict) else result)
+                        st.error(msg or "验证码发送失败")
 
-                st.caption("验证码登录用于免密登录，邮箱需为已注册邮箱。")
+            with col_email_btn2:
+                if st.button("验证码登录", type="primary", use_container_width=True, key="email_code_login_btn"):
+                    with st.spinner("正在验证验证码..."):
+                        success, result = analyzer.auth.login_with_email_code(email, email_code)
+                    if success:
+                        st.session_state.authenticated = True
+                        st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=email)
+                        st.session_state.user_id = st.session_state.user_info.get('user_id')
+                        st.session_state.public_auth_requested = False
+                        st.success("登录成功！")
+                        _log("login", {"email": email, "mode": "email_code"})
+                        st.rerun()
+                    else:
+                        msg = result.get("message") if isinstance(result, dict) else str(result)
+                        st.error(msg or "验证码登录失败")
+
+            st.caption("验证码登录用于免密登录，邮箱需为已注册邮箱。")
 
         with tab_register:
             new_username = st.text_input("用户名", key="reg_username", placeholder="至少3个字符")
@@ -2844,16 +2826,22 @@ def render_auth_page(analyzer):
                             st.session_state.public_auth_requested = False
                             st.rerun()
                         else:
-                            st.info("注册成功，但自动登录失败，请回到“用户登录”手动登录。")
+                            st.info("注册成功，但自动登录失败，请回到“用户名/密码登录”手动登录。")
                     else:
                         st.error(msg if isinstance(msg, str) else "注册失败")
 
         with st.expander("快速体验"):
-            st.markdown("""**演示账号**（如已在数据库中创建）：  
+            st.markdown("""**演示账号**：  
 - 用户名：demo_user  
 - 密码：demo123  
 
 也可以直接注册新账号，或使用邮箱验证码免密登录。""")
+
+        st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+        if st.button("返回首页", use_container_width=True, key="auth_back_home_btn_bottom"):
+            st.session_state.current_page = "首页"
+            st.session_state.public_auth_requested = False
+            st.rerun()
 
     if st.session_state.show_forgot_password:
         render_forgot_password(analyzer)
