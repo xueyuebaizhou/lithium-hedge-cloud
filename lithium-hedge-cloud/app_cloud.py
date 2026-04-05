@@ -2258,12 +2258,23 @@ def render_global_nav():
     reverse_alias = {v: k for k, v in page_alias.items()}
     current_page = st.session_state.get("current_page", "首页")
     current_label = reverse_alias.get(current_page, current_page)
+    is_authed = bool(st.session_state.get("authenticated", False))
 
     active_group = "首页"
     for gname, labels in group_pages.items():
         if current_label in labels:
             active_group = gname
             break
+
+    right_meta = "大连熵合科技有限公司｜面向碳酸锂产业链企业的一体化数字平台"
+    if is_authed:
+        user_info = st.session_state.get('user_info') or {}
+        username = user_info.get('username', '用户')
+        right_current = f"当前模块：{active_group} <span> / {current_label}</span>"
+        right_action_html = f"<div class='eh-navbar-actions'><span class='eh-user-chip'>已登录：{username}</span></div>"
+    else:
+        right_current = "当前状态：<span>访客模式（首页可见）</span>"
+        right_action_html = "<div class='eh-navbar-actions'><span class='eh-user-chip'>访客</span></div>"
 
     st.markdown(
         f"""
@@ -2274,8 +2285,8 @@ def render_global_nav():
                     <div class='eh-brand-sub'>新能源企业风险管理SaaS平台</div>
                 </div>
                 <div class='eh-navbar-right'>
-                    <div class='eh-navbar-meta'>大连熵合科技有限公司｜面向碳酸锂产业链企业的一体化数字平台</div>
-                    <div class='eh-navbar-current'>当前模块：{active_group} <span> / {current_label}</span></div>
+                    <div class='eh-navbar-meta'>{right_meta}</div>
+                    <div class='eh-navbar-current'>{right_current}</div>
                 </div>
             </div>
         </div>
@@ -2283,12 +2294,13 @@ def render_global_nav():
         unsafe_allow_html=True,
     )
 
-    cols = st.columns([1.0, 1.12, 1.12, 1.12, 1.12, 3.0], gap="small")
+    cols = st.columns([1.0, 1.12, 1.12, 1.12, 1.12, 1.55, 1.0], gap="small")
     home_active = current_page == "首页"
     if cols[0].button(f"{'● ' if home_active else ''}首页", key="nav_home_btn", use_container_width=True):
+        st.session_state.public_auth_requested = False
         if current_page != "首页":
             st.session_state.current_page = "首页"
-            st.rerun()
+        st.rerun()
 
     for idx, (group_name, labels) in enumerate(group_pages.items(), start=1):
         active = current_label in labels
@@ -2299,9 +2311,19 @@ def render_global_nav():
                 page_value = page_alias.get(label, label)
                 is_active = current_page == page_value
                 if st.button(f"{'当前页 · ' if is_active else ''}{label}", key=f"nav_pop_{group_name}_{label}", use_container_width=True):
-                    if page_value != current_page:
-                        st.session_state.current_page = page_value
-                        st.rerun()
+                    st.session_state.current_page = page_value
+                    if not is_authed and page_value != '首页':
+                        st.session_state.public_auth_requested = True
+                    st.rerun()
+
+    if is_authed:
+        if cols[5].button("个人中心 / 退出", key="nav_profile_btn", use_container_width=True):
+            st.session_state.current_page = "账号设置"
+            st.rerun()
+    else:
+        if cols[5].button("登录 / 注册", key="nav_login_btn", use_container_width=True):
+            st.session_state.public_auth_requested = True
+            st.rerun()
 
     try:
         price_data = st.session_state.get("_nav_price_cache")
@@ -2314,12 +2336,15 @@ def render_global_nav():
             latest_price = float(price_data['收盘价'].iloc[-1])
             latest_date = pd.to_datetime(price_data['日期'].iloc[-1]).strftime('%Y-%m-%d')
             latest_chg = float(price_data['涨跌幅'].iloc[-1]) if '涨跌幅' in price_data.columns and not pd.isna(price_data['涨跌幅'].iloc[-1]) else 0.0
-            user_info = st.session_state.get('user_info') or {}
-            username = user_info.get('username', '用户')
+            if is_authed:
+                user_info = st.session_state.get('user_info') or {}
+                username = user_info.get('username', '用户')
+            else:
+                username = '访客'
             st.markdown(
                 f"""
                 <div class='eh-statusbar'>
-                    <div class='eh-status-item'><span>当前用户</span><strong>{username}</strong></div>
+                    <div class='eh-status-item'><span>当前身份</span><strong>{username}</strong></div>
                     <div class='eh-status-item'><span>碳酸锂期货</span><strong>{latest_price:,.0f}</strong></div>
                     <div class='eh-status-item'><span>日涨跌幅</span><strong>{latest_chg:+.2f}%</strong></div>
                     <div class='eh-status-item'><span>数据日期</span><strong>{latest_date}</strong></div>
@@ -2362,6 +2387,8 @@ def main():
         st.session_state.reset_username = None
     if 'force_refresh' not in st.session_state:
         st.session_state.force_refresh = False
+    if 'public_auth_requested' not in st.session_state:
+        st.session_state.public_auth_requested = False
 
     current_page_for_style = st.session_state.get('current_page', '首页')
     bg_blur = '0.65px' if current_page_for_style == '首页' else '1.2px'
@@ -2470,6 +2497,8 @@ def main():
     .eh-navbar-meta {font-size:.92rem; color:var(--muted); text-align:right;}
     .eh-navbar-current {margin-top:6px; font-size:.9rem; color:var(--gold-deep); font-weight:800; text-align:right;}
     .eh-navbar-current span {color:var(--text); font-weight:700;}
+    .eh-navbar-actions {display:flex; gap:10px; justify-content:flex-end; margin-top:8px;}
+    .eh-user-chip {display:inline-flex; align-items:center; padding:6px 12px; border-radius:999px; background:rgba(201,169,107,0.10); border:1px solid rgba(201,169,107,0.18); color:var(--gold-deep); font-size:.82rem; font-weight:800;}
 
     .extra-group-title {margin: .45rem 0 .65rem 0; font-size: .92rem; color: var(--gold-deep); font-weight: 800; letter-spacing: .08em;}
 
@@ -2669,15 +2698,17 @@ def main():
     # 检查Supabase连接状态（v46：隐藏侧边栏状态提示，不影响功能）
     pass
     
-    # 登录/注册页面
+    # 未登录时：首页可见；其余功能或主动点击登录时进入登录页
     if not st.session_state.authenticated:
         if st.session_state.show_forgot_password:
             render_forgot_password(analyzer)
-        elif st.session_state.show_reset_form and (st.session_state.reset_email or st.session_state.reset_username):
+            return
+        if st.session_state.show_reset_form and (st.session_state.reset_email or st.session_state.reset_username):
             render_reset_password(analyzer)
-        else:
+            return
+        if st.session_state.get('public_auth_requested', False) or st.session_state.get('current_page', '首页') != '首页':
             render_auth_page(analyzer)
-        return
+            return
     
     # 主应用界面
     render_main_app(analyzer)
@@ -2687,47 +2718,35 @@ def main():
 # ============================================================================
 
 def render_auth_page(analyzer):
-    """渲染登录/注册页面（v5：左品牌 + 右登录双栏）"""
+    """渲染登录/注册页面（访客可先看首页；点登录/注册或访问功能页时进入）"""
     st.markdown('<h1 class="main-header">新能源企业风险管理平台</h1>', unsafe_allow_html=True)
     st.markdown('<p class="auth-subtitle">面向碳酸锂产业链企业的一体化数字平台</p>', unsafe_allow_html=True)
 
     if "show_forgot_password" not in st.session_state:
         st.session_state.show_forgot_password = False
 
-    st.markdown("""
-    <div class='auth-shell'>
-        <div class='auth-brand-card'>
-            <div class='auth-brand-kicker'>Entropy Harmony Technology</div>
-            <div class='auth-brand-title'>以真实市场数据与动态风险建模，<br/>构建企业级新能源风险管理工作台</div>
-            <div class='auth-brand-desc'>
-                平台围绕价格行情、基差走势、套保测算、多情景压力测试、期权策略支持与分析报告输出，
-                为碳酸锂产业链企业提供从市场监测到经营决策的统一分析界面。
-            </div>
-            <div class='auth-brand-tags'>
-                <span>企业官网风首页</span>
-                <span>专业 SaaS 后台</span>
-                <span>实时风险分析</span>
-                <span>比赛 / 路演可展示</span>
-            </div>
-            <div class='auth-brand-grid'>
-                <div><strong>6</strong><span>核心功能模块</span></div>
-                <div><strong>4</strong><span>典型应用场景</span></div>
-                <div><strong>1</strong><span>一体化数字平台</span></div>
-            </div>
-        </div>
-        <div class='auth-form-card'>
+    wrap_left, wrap_center, wrap_right = st.columns([1, 1.25, 1])
+    with wrap_center:
+        st.markdown("""
+        <div class='auth-form-card' style='max-width:760px;margin:0 auto;padding:28px 30px 22px 30px;'>
             <div class='auth-form-title'>用户登录</div>
-            <div class='auth-form-text'>支持用户名密码登录、邮箱验证码登录与新用户注册。</div>
+            <div class='auth-form-text'>请登录后使用价格行情、价差走势、套保测算、多情景分析、期权计算与报告输出等完整功能。</div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
-    # actual interactive form placed under the right card area via columns, keeping layout stable in Streamlit
-    left, right = st.columns([1.15, 0.95], gap="large")
-    with left:
-        st.empty()
-    with right:
-        tab_login, tab_register = st.tabs(["用户登录", "新用户注册"])
+        top_a, top_b = st.columns([1,1])
+        with top_a:
+            if st.button("返回首页", use_container_width=True, key="auth_back_home_btn"):
+                st.session_state.current_page = "首页"
+                st.session_state.public_auth_requested = False
+                st.rerun()
+        with top_b:
+            if st.button("前往注册", use_container_width=True, key="auth_go_register_btn"):
+                st.session_state['_auth_default_tab'] = 'register'
+
+        default_register = st.session_state.pop('_auth_default_tab', None) == 'register'
+        tab_list = st.tabs(["用户登录", "新用户注册"])
+        tab_login, tab_register = tab_list[0], tab_list[1]
 
         with tab_login:
             login_tab_pwd, login_tab_email = st.tabs(["用户名/密码登录", "邮箱验证码登录"])
@@ -2745,6 +2764,7 @@ def render_auth_page(analyzer):
                             st.session_state.authenticated = True
                             st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=username)
                             st.session_state.user_id = st.session_state.user_info.get('user_id')
+                            st.session_state.public_auth_requested = False
                             st.success("登录成功！")
                             _log("login", {"username": username, "mode": "password"})
                             st.rerun()
@@ -2785,6 +2805,7 @@ def render_auth_page(analyzer):
                             st.session_state.authenticated = True
                             st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=email)
                             st.session_state.user_id = st.session_state.user_info.get('user_id')
+                            st.session_state.public_auth_requested = False
                             st.success("登录成功！")
                             _log("login", {"email": email, "mode": "email_code"})
                             st.rerun()
@@ -2820,6 +2841,7 @@ def render_auth_page(analyzer):
                             st.session_state.authenticated = True
                             st.session_state.user_info = _extract_user_info_from_login_result(result, username_fallback=new_username)
                             st.session_state.user_id = st.session_state.user_info.get('user_id')
+                            st.session_state.public_auth_requested = False
                             st.rerun()
                         else:
                             st.info("注册成功，但自动登录失败，请回到“用户登录”手动登录。")
@@ -2835,6 +2857,7 @@ def render_auth_page(analyzer):
 
     if st.session_state.show_forgot_password:
         render_forgot_password(analyzer)
+
 
 def _cooldown_remaining(state_key: str, cooldown_seconds: int = 60) -> int:
     sent_at = st.session_state.get(state_key)
