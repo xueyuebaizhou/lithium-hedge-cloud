@@ -2247,16 +2247,16 @@ def render_standard_page_header(title: str, desc: str):
 
 
 def render_global_nav():
-    core_pages = ["首页", "价格行情", "价差走势", "套保计算", "多情景分析", "期权计算", "分析报告"]
-    extra_groups = {
-        "经营分析模块": ["风险敞口", "库存管理", "利润管理"],
-        "系统管理模块": ["分析历史", "策略管理", "账号设置"],
+    group_pages = {
+        "市场分析": ["价格行情", "价差走势"],
+        "策略测算": ["套保计算", "多情景分析", "期权计算"],
+        "经营管理": ["风险敞口", "库存管理", "利润管理"],
+        "报告中心": ["分析报告", "分析历史", "策略管理", "账号设置"],
     }
     page_alias = {"期权计算": "期权保险"}
+    reverse_alias = {v: k for k, v in page_alias.items()}
     current_page = st.session_state.get("current_page", "首页")
-    nav_value = "期权计算" if current_page == "期权保险" else current_page
-    if nav_value not in core_pages:
-        nav_value = "首页"
+    current_label = reverse_alias.get(current_page, current_page)
 
     st.markdown(
         f"""
@@ -2274,30 +2274,26 @@ def render_global_nav():
         """,
         unsafe_allow_html=True,
     )
-    nav_choice = st.radio(
-        "顶部导航",
-        core_pages,
-        horizontal=True,
-        index=core_pages.index(nav_value),
-        label_visibility="collapsed",
-        key="top_nav_core",
-    )
-    target_page = page_alias.get(nav_choice, nav_choice)
-    if target_page != current_page:
-        st.session_state.current_page = target_page
-        st.rerun()
 
-    extra_pages = [p for pages in extra_groups.values() for p in pages]
-    with st.expander("更多模块", expanded=current_page in extra_pages):
-        for group_name, pages in extra_groups.items():
-            st.markdown(f"<div class='extra-group-title'>{group_name}</div>", unsafe_allow_html=True)
-            cols = st.columns(len(pages))
-            for i, label in enumerate(pages):
-                is_active = current_page == label
-                btn_label = f"● {label}" if is_active else label
-                if cols[i].button(btn_label, use_container_width=True, key=f"extra_btn_{group_name}_{label}"):
-                    st.session_state.current_page = label
-                    st.rerun()
+    cols = st.columns([1.0, 1.12, 1.12, 1.12, 1.12, 3.0], gap="small")
+    home_active = current_page == "首页"
+    if cols[0].button(f"{'● ' if home_active else ''}首页", key="nav_home_btn", use_container_width=True):
+        if current_page != "首页":
+            st.session_state.current_page = "首页"
+            st.rerun()
+
+    for idx, (group_name, labels) in enumerate(group_pages.items(), start=1):
+        active = current_label in labels
+        pop_label = f"{'● ' if active else ''}{group_name}"
+        with cols[idx].popover(pop_label, use_container_width=True):
+            st.markdown(f"<div class='popover-group-title'>{group_name}</div>", unsafe_allow_html=True)
+            for label in labels:
+                page_value = page_alias.get(label, label)
+                is_active = current_page == page_value
+                if st.button(f"{'当前页 · ' if is_active else ''}{label}", key=f"nav_pop_{group_name}_{label}", use_container_width=True):
+                    if page_value != current_page:
+                        st.session_state.current_page = page_value
+                        st.rerun()
 
     try:
         price_data = st.session_state.get("_nav_price_cache")
@@ -2358,10 +2354,16 @@ def main():
         st.session_state.reset_username = None
     if 'force_refresh' not in st.session_state:
         st.session_state.force_refresh = False
-    
+
+    current_page_for_style = st.session_state.get('current_page', '首页')
+    bg_blur = '1.15px' if current_page_for_style == '首页' else '1.8px'
+    bg_overlay_top = '0.60' if current_page_for_style == '首页' else '0.70'
+    bg_overlay_bottom = '0.70' if current_page_for_style == '首页' else '0.78'
+    shell_blur = '0.6px' if current_page_for_style == '首页' else '1px'
+
     # 自定义CSS
     banner_uri = _to_data_uri(BANNER_IMAGE_PATH)
-    st.markdown("""
+    css = """
     <style>
     #MainMenu, footer, [data-testid="stToolbar"], [data-testid="stStatusWidget"], [data-testid="stDecoration"], [data-testid="stHeaderActionElements"] {display:none !important;}
     [data-testid="stSidebar"], [data-testid="collapsedControl"] {display:none !important;}
@@ -2390,10 +2392,10 @@ def main():
     .stApp::before {
         content: ""; position: fixed; inset: 0; z-index: 0;
         background:
-            linear-gradient(rgba(247,247,247,0.88), rgba(247,247,247,0.92)),
+            linear-gradient(rgba(247,247,247,__BG_OVERLAY_TOP__), rgba(247,247,247,__BG_OVERLAY_BOTTOM__),
             url("__BANNER__");
         background-size: cover; background-position: center center; background-attachment: fixed;
-        filter: blur(5px) saturate(0.95);
+        filter: blur(__BG_BLUR__) saturate(0.98);
         transform: scale(1.03);
         pointer-events: none;
     }
@@ -2430,6 +2432,17 @@ def main():
 
     .extra-group-title {margin: .45rem 0 .65rem 0; font-size: .92rem; color: var(--gold-deep); font-weight: 800; letter-spacing: .08em;}
 
+    .popover-group-title {font-size: .92rem; color: var(--gold-deep); font-weight: 800; margin-bottom: .55rem; letter-spacing: .06em;}
+    div[data-testid="stPopover"] > div > button {
+        width: 100%; border-radius: 10px !important; border: 1px solid transparent !important;
+        background: transparent !important; color: var(--text) !important; font-weight: 700 !important; min-height: 2.7rem !important;
+    }
+    div[data-testid="stPopover"] > div > button:hover {background: rgba(201,169,107,0.08) !important; border-color: rgba(201,169,107,0.28) !important;}
+    div[data-testid="stPopover"] > div > button:focus {box-shadow: none !important; border-color: rgba(201,169,107,0.40) !important;}
+    div[data-testid="stPopoverContent"] {border-radius: 12px !important; border: 1px solid var(--line) !important; box-shadow: 0 12px 30px rgba(0,0,0,0.10) !important;}
+    div[data-testid="stPopoverContent"] button[kind="secondary"] {justify-content: flex-start !important; text-align: left !important; border-radius: 10px !important; background: #fff !important;}
+    div[data-testid="stPopoverContent"] button[kind="secondary"]:hover {background: rgba(201,169,107,0.08) !important; border-color: rgba(201,169,107,0.22) !important;}
+
     div[role="radiogroup"] {gap: .45rem;}
     div[role="radiogroup"] label {
         background: transparent !important;
@@ -2462,7 +2475,7 @@ def main():
 
     .page-shell, .soft-card, .quick-card, [data-testid="stMetric"], [data-testid="stExpander"], .stDataFrame, [data-testid="stTable"] {
         background: rgba(255,255,255,0.92) !important; border: 1px solid var(--line) !important; border-radius: var(--radius) !important; box-shadow: var(--shadow) !important;
-        backdrop-filter: blur(2px);
+        backdrop-filter: blur(__SHELL_BLUR__);
     }
     .page-shell {padding: 24px 26px; margin: .4rem 0 1rem 0;}
     .page-shell-title {font-size: 2rem; font-weight: 800; letter-spacing: -0.02em;}
@@ -2471,10 +2484,10 @@ def main():
     .hero-card {padding: 0 !important; overflow: hidden; background: transparent !important; border: none !important; box-shadow:none !important;}
     .hero-banner {
         position: relative; min-height: 500px; border-radius: 18px; overflow: hidden;
-        background: linear-gradient(90deg, rgba(32,43,56,0.72) 0%, rgba(32,43,56,0.58) 28%, rgba(255,255,255,0.06) 72%, rgba(255,255,255,0.03) 100%);
+        background: linear-gradient(90deg, rgba(27,36,48,0.56) 0%, rgba(27,36,48,0.44) 28%, rgba(255,255,255,0.05) 72%, rgba(255,255,255,0.02) 100%);
         border: 1px solid rgba(255,255,255,0.34);
         box-shadow: var(--shadow);
-        backdrop-filter: blur(3px);
+        backdrop-filter: blur(1px);
     }
     .hero-banner::before {
         content: ""; position:absolute; inset:0;
@@ -2557,7 +2570,15 @@ def main():
         .hero-title {font-size: 2rem;}
     }
     </style>
-    """.replace("__BANNER__", banner_uri), unsafe_allow_html=True)
+    """
+    css = (css
+        .replace("__BANNER__", banner_uri)
+        .replace("__BG_OVERLAY_TOP__", str(bg_overlay_top))
+        .replace("__BG_OVERLAY_BOTTOM__", str(bg_overlay_bottom))
+        .replace("__BG_BLUR__", str(bg_blur))
+        .replace("__SHELL_BLUR__", str(shell_blur))
+    )
+    st.markdown(css, unsafe_allow_html=True)
 
     # 检查Supabase连接状态（v46：隐藏侧边栏状态提示，不影响功能）
     pass
@@ -2874,6 +2895,8 @@ def render_main_app(analyzer):
 
 def render_home_page(analyzer):
     """渲染首页（官网风重构版）"""
+
+    ref_uri = _to_data_uri(BANNER_IMAGE_PATH)
 
     st.markdown(
         f"""
