@@ -737,6 +737,9 @@ PLOTLY_FONT_FAMILY = "NotoSansCJKSC, Microsoft YaHei, SimHei, PingFang SC, Heiti
 for tpl in ["plotly", "plotly_white", "plotly_dark", "ggplot2", "seaborn", "simple_white", "presentation"]:
     try:
         pio.templates[tpl].layout.font.family = PLOTLY_FONT_FAMILY
+        pio.templates[tpl].layout.paper_bgcolor = "rgba(255,255,255,0)"
+        pio.templates[tpl].layout.plot_bgcolor = "rgba(255,255,255,0.72)"
+        pio.templates[tpl].layout.colorway = ["#355c7d", "#c9a96b", "#6c7a89", "#8f6f3e", "#5a7d6c"]
     except Exception:
         pass
 
@@ -2214,8 +2217,9 @@ def black_scholes_price(option_type: str, spot: float, strike: float, time_years
 # =========================
 # UI assets & helpers (vUI 重构)
 # =========================
-BANNER_IMAGE_PATH = "/mnt/data/virtual_attach_file-7a5b68a8-40cd-4f41-ab1e-2d0912fa0fd8.jpg"
-HOME_REFERENCE_IMAGE_PATH = "/mnt/data/0833c90d-a3df-4b56-a5a2-9a1431e9d0ed-9ab98e37-903c-454f-8493-f85db08fbf69.jpg"
+PROJECT_ROOT = os.path.dirname(__file__)
+BANNER_IMAGE_PATH = os.path.join(PROJECT_ROOT, "assets", "hero_banner.png")
+HOME_REFERENCE_IMAGE_PATH = BANNER_IMAGE_PATH
 
 
 def _to_data_uri(local_path: str) -> str:
@@ -2244,14 +2248,16 @@ def render_standard_page_header(title: str, desc: str):
 
 def render_global_nav():
     core_pages = ["首页", "价格行情", "价差走势", "套保计算", "多情景分析", "期权计算", "分析报告"]
-    extra_pages = ["风险敞口", "库存管理", "利润管理", "分析历史", "策略管理", "账号设置"]
+    extra_groups = {
+        "经营分析模块": ["风险敞口", "库存管理", "利润管理"],
+        "系统管理模块": ["分析历史", "策略管理", "账号设置"],
+    }
     page_alias = {"期权计算": "期权保险"}
     current_page = st.session_state.get("current_page", "首页")
     nav_value = "期权计算" if current_page == "期权保险" else current_page
     if nav_value not in core_pages:
         nav_value = "首页"
 
-    banner_uri = _to_data_uri(BANNER_IMAGE_PATH)
     st.markdown(
         f"""
         <div class='eh-navbar'>
@@ -2281,23 +2287,17 @@ def render_global_nav():
         st.session_state.current_page = target_page
         st.rerun()
 
-    with st.expander("更多模块", expanded=current_page not in core_pages):
-        extra_choice = st.radio(
-            "扩展模块",
-            extra_pages,
-            horizontal=True,
-            index=extra_pages.index(current_page) if current_page in extra_pages else 0,
-            label_visibility="collapsed",
-            key="top_nav_extra",
-        )
-        if current_page not in core_pages and extra_choice != current_page:
-            st.session_state.current_page = extra_choice
-            st.rerun()
-        cols = st.columns([1.1, 1.1, 1.1, 1.1, 1.1, 1.1])
-        for i, label in enumerate(extra_pages):
-            if cols[i].button(label, use_container_width=True, key=f"extra_btn_{label}"):
-                st.session_state.current_page = label
-                st.rerun()
+    extra_pages = [p for pages in extra_groups.values() for p in pages]
+    with st.expander("更多模块", expanded=current_page in extra_pages):
+        for group_name, pages in extra_groups.items():
+            st.markdown(f"<div class='extra-group-title'>{group_name}</div>", unsafe_allow_html=True)
+            cols = st.columns(len(pages))
+            for i, label in enumerate(pages):
+                is_active = current_page == label
+                btn_label = f"● {label}" if is_active else label
+                if cols[i].button(btn_label, use_container_width=True, key=f"extra_btn_{group_name}_{label}"):
+                    st.session_state.current_page = label
+                    st.rerun()
 
     try:
         price_data = st.session_state.get("_nav_price_cache")
@@ -2360,6 +2360,7 @@ def main():
         st.session_state.force_refresh = False
     
     # 自定义CSS
+    banner_uri = _to_data_uri(BANNER_IMAGE_PATH)
     st.markdown("""
     <style>
     #MainMenu, footer, [data-testid="stToolbar"], [data-testid="stStatusWidget"], [data-testid="stDecoration"], [data-testid="stHeaderActionElements"] {display:none !important;}
@@ -2384,7 +2385,20 @@ def main():
         color: var(--text);
     }
     .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"] {
-        background: var(--bg) !important;
+        background: transparent !important;
+    }
+    .stApp::before {
+        content: ""; position: fixed; inset: 0; z-index: 0;
+        background:
+            linear-gradient(rgba(247,247,247,0.88), rgba(247,247,247,0.92)),
+            url("__BANNER__");
+        background-size: cover; background-position: center center; background-attachment: fixed;
+        filter: blur(5px) saturate(0.95);
+        transform: scale(1.03);
+        pointer-events: none;
+    }
+    [data-testid="stAppViewContainer"] > .main, [data-testid="stAppViewContainer"] .block-container, [data-testid="stVerticalBlock"] {
+        position: relative; z-index: 1;
     }
     .block-container {
         max-width: var(--maxw);
@@ -2413,6 +2427,8 @@ def main():
     .eh-brand-title {font-size: 1.55rem; font-weight: 800; letter-spacing: 0.02em;}
     .eh-brand-sub {font-size:.88rem; color:var(--muted); margin-top: 2px;}
     .eh-navbar-meta {font-size:.92rem; color:var(--muted);}
+
+    .extra-group-title {margin: .45rem 0 .65rem 0; font-size: .92rem; color: var(--gold-deep); font-weight: 800; letter-spacing: .08em;}
 
     div[role="radiogroup"] {gap: .45rem;}
     div[role="radiogroup"] label {
@@ -2444,29 +2460,31 @@ def main():
     .eh-status-item span {display:block; font-size:.84rem; color:var(--muted); margin-bottom:4px;}
     .eh-status-item strong {font-size:1.08rem; color:var(--text);}
 
-    .page-shell, .soft-card, .hero-card, .quick-card, [data-testid="stMetric"], [data-testid="stExpander"], .stDataFrame, [data-testid="stTable"] {
-        background: var(--card) !important; border: 1px solid var(--line) !important; border-radius: var(--radius) !important; box-shadow: var(--shadow) !important;
+    .page-shell, .soft-card, .quick-card, [data-testid="stMetric"], [data-testid="stExpander"], .stDataFrame, [data-testid="stTable"] {
+        background: rgba(255,255,255,0.92) !important; border: 1px solid var(--line) !important; border-radius: var(--radius) !important; box-shadow: var(--shadow) !important;
+        backdrop-filter: blur(2px);
     }
     .page-shell {padding: 24px 26px; margin: .4rem 0 1rem 0;}
     .page-shell-title {font-size: 2rem; font-weight: 800; letter-spacing: -0.02em;}
     .page-shell-desc {margin-top: .4rem; color: var(--muted); line-height: 1.8;}
 
-    .hero-card {padding: 0 !important; overflow: hidden;}
+    .hero-card {padding: 0 !important; overflow: hidden; background: transparent !important; border: none !important; box-shadow:none !important;}
     .hero-banner {
-        position: relative; min-height: 520px; border-radius: 12px; overflow: hidden;
-        background-size: cover; background-position: center center;
+        position: relative; min-height: 500px; border-radius: 18px; overflow: hidden;
+        background: linear-gradient(90deg, rgba(32,43,56,0.72) 0%, rgba(32,43,56,0.58) 28%, rgba(255,255,255,0.06) 72%, rgba(255,255,255,0.03) 100%);
+        border: 1px solid rgba(255,255,255,0.34);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(3px);
     }
     .hero-banner::before {
         content: ""; position:absolute; inset:0;
-        background: rgba(20,30,40,0.45);
-        backdrop-filter: blur(2px);
-    }
-    .hero-banner::after {
-        content: ""; position:absolute; inset:0;
-        background: linear-gradient(90deg, rgba(20,30,40,0.72) 0%, rgba(20,30,40,0.58) 30%, rgba(20,30,40,0.18) 62%, rgba(20,30,40,0.05) 100%);
+        background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.00) 100%);
     }
     .hero-content {
-        position:relative; z-index:2; max-width: 620px; padding: 76px 56px; color:#fff;
+        position:relative; z-index:2; max-width: 680px; padding: 82px 56px; color:#fff;
+    }
+    .hero-content-panel {
+        min-height: 500px; display:flex; flex-direction:column; justify-content:center;
     }
     .hero-kicker {font-size:.95rem; color: rgba(255,255,255,.76); letter-spacing: .14em; text-transform: uppercase;}
     .hero-title {font-size: 3rem; line-height: 1.18; font-weight: 800; color:#fff; margin: 1rem 0 .9rem 0;}
@@ -2539,7 +2557,7 @@ def main():
         .hero-title {font-size: 2rem;}
     }
     </style>
-    """, unsafe_allow_html=True)
+    """.replace("__BANNER__", banner_uri), unsafe_allow_html=True)
 
     # 检查Supabase连接状态（v46：隐藏侧边栏状态提示，不影响功能）
     pass
@@ -2806,20 +2824,20 @@ def _close_card():
 
 def _matplotlib_style(ax, title: str | None = None, xlabel: str | None = None, ylabel: str | None = None):
     try:
-        ax.set_facecolor("white")
-        ax.grid(True, alpha=0.18, linestyle="--", linewidth=0.8)
+        ax.set_facecolor("#FCFBF7")
+        ax.grid(True, alpha=0.22, linestyle="--", linewidth=0.8, color="#d8cdb8")
         for side in ["top", "right"]:
             ax.spines[side].set_visible(False)
         for side in ["left", "bottom"]:
-            ax.spines[side].set_color("#d9e2ef")
+            ax.spines[side].set_color("#d8cdb8")
             ax.spines[side].set_linewidth(1.0)
-        ax.tick_params(colors="#475467", labelsize=10)
+        ax.tick_params(colors="#5b6470", labelsize=10)
         if title is not None:
-            ax.set_title(title, fontsize=14, fontweight="bold", color="#172033")
+            ax.set_title(title, fontsize=16, fontweight="bold", color="#2B2F33", pad=12)
         if xlabel is not None:
-            ax.set_xlabel(xlabel, fontsize=11, color="#344054")
+            ax.set_xlabel(xlabel, fontsize=11, color="#5b6470")
         if ylabel is not None:
-            ax.set_ylabel(ylabel, fontsize=11, color="#344054")
+            ax.set_ylabel(ylabel, fontsize=11, color="#5b6470")
     except Exception:
         pass
 
@@ -2856,14 +2874,12 @@ def render_main_app(analyzer):
 
 def render_home_page(analyzer):
     """渲染首页（官网风重构版）"""
-    banner_uri = _to_data_uri(BANNER_IMAGE_PATH)
-    ref_uri = _to_data_uri(HOME_REFERENCE_IMAGE_PATH)
 
     st.markdown(
         f"""
         <div class='hero-card'>
-            <div class='hero-banner' style='background-image:url("{banner_uri}");'>
-                <div class='hero-content'>
+            <div class='hero-banner'>
+                <div class='hero-content hero-content-panel'>
                     <div class='hero-kicker'>Entropy Harmony Technology</div>
                     <div class='hero-title'>新能源企业风险管理平台</div>
                     <div class='hero-desc'>
