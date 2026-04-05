@@ -2508,11 +2508,10 @@ def main():
     .section-kicker {font-size: .92rem; color: var(--gold-deep); text-transform: uppercase; letter-spacing: .12em;}
     .section-subtle {color: var(--muted); line-height: 1.9; margin-bottom: 1rem;}
 
-    .intro-grid {display:grid; grid-template-columns: 1.35fr .85fr; gap: 20px; margin: 1rem 0 1.2rem 0;}
-    .intro-card {padding: 28px; background: var(--card); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);}
-    .intro-card p {color: var(--muted); line-height: 1.95; font-size: 1rem;}
-    .intro-image-card {padding: 16px; background: linear-gradient(180deg,#fff,#faf8f2); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);}
-    .intro-image-card img {width:100%; height:100%; min-height: 280px; object-fit: cover; border-radius: 10px; display:block;}
+    .intro-grid {display:grid; grid-template-columns: minmax(0, 1fr); gap: 20px; margin: 1rem 0 1.2rem 0;}
+    .intro-card {padding: 30px 34px; background: rgba(255,255,255,0.96); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); max-width: 1120px; margin: 0 auto;}
+    .intro-card p {color: var(--muted); line-height: 1.95; font-size: 1rem; margin: 0 0 1.1rem 0;}
+    .intro-card p:last-child {margin-bottom: 0;}
 
     .cap-grid {display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; margin: .9rem 0 1.2rem 0;}
     .scene-grid {display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; margin: .9rem 0 1.2rem 0;}
@@ -2929,14 +2928,11 @@ def render_home_page(analyzer):
 
     st.markdown("<div class='section-kicker'>Platform Profile</div><div class='section-title'>平台简介 / Platform Profile</div>", unsafe_allow_html=True)
     st.markdown(
-        f"""
+        """
         <div class='intro-grid'>
             <div class='intro-card'>
                 <p>熵合科技新能源企业风险管理平台，面向碳酸锂产业链企业在原材料价格波动背景下的经营风险管理需求而设计。平台基于真实市场数据与动态风险建模方法，构建价格监测、基差分析、套期保值测算、多情景压力测试及策略评估的一体化分析体系。</p>
                 <p>通过对期货与市场参考价格的联动分析，平台帮助企业识别价格风险敞口，评估不同套保策略下的盈亏表现与风险水平，从而提升企业在复杂市场环境中的决策能力与风险控制水平。</p>
-            </div>
-            <div class='intro-image-card'>
-                <img src="{ref_uri}" alt="平台视觉参考" />
             </div>
         </div>
         """,
