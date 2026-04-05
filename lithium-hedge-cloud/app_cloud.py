@@ -2459,8 +2459,12 @@ def main():
         animation: ehFadeUp .75s ease both;
     }
     .auth-subtitle {
-        text-align:center; color:rgba(255,255,255,.82); margin:0 auto 1.4rem auto; max-width: 760px; font-size: 1.08rem; line-height: 1.9;
+        width:100%; display:flex; justify-content:center; align-items:center; text-align:center;
+        color:rgba(255,255,255,.82); margin:0 auto 1.4rem auto; max-width:none; font-size: 1.08rem; line-height: 1.9;
         animation: ehFadeUp .95s ease both;
+    }
+    .auth-subtitle span {
+        display:block; width:100%; text-align:center;
     }
     .auth-shell {
         display:grid; grid-template-columns: 1.15fr .95fr; gap: 26px; align-items: stretch; margin-top: 1.4rem;
@@ -2720,7 +2724,7 @@ def main():
 def render_auth_page(analyzer):
     """渲染登录/注册页面（访客可先看首页；点登录/注册或访问功能页时进入）"""
     st.markdown('<h1 class="main-header">新能源企业风险管理平台</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="auth-subtitle" style="text-align:center;">面向碳酸锂产业链企业的一体化数字平台</p>', unsafe_allow_html=True)
+    st.markdown('<div class="auth-subtitle"><span>面向碳酸锂产业链企业的一体化数字平台</span></div>', unsafe_allow_html=True)
 
     if "show_forgot_password" not in st.session_state:
         st.session_state.show_forgot_password = False
