@@ -2392,7 +2392,7 @@ def main():
     .stApp::before {
         content: ""; position: fixed; inset: 0; z-index: 0;
         background:
-            linear-gradient(rgba(247,247,247,__BG_OVERLAY_TOP__), rgba(247,247,247,__BG_OVERLAY_BOTTOM__),
+            linear-gradient(rgba(247,247,247,__BG_OVERLAY_TOP__), rgba(247,247,247,__BG_OVERLAY_BOTTOM__)),
             url("__BANNER__");
         background-size: cover; background-position: center center; background-attachment: fixed;
         filter: blur(__BG_BLUR__) saturate(0.98);
