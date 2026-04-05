@@ -730,6 +730,7 @@ else:
     # 兜底（若 fonts/ 没放字体，仍可能变方框）
     matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans', 'Arial']
 matplotlib.rcParams['axes.unicode_minus'] = False
+matplotlib.rcParams['axes.prop_cycle'] = matplotlib.cycler(color=['#B9924D', '#496A81', '#2E8B80', '#A55D4C', '#6E7480'])
 
 # Plotly 全局字体（浏览器端）：优先使用我们注入的 'NotoSansCJKSC'
 import plotly.io as pio
@@ -2248,15 +2249,21 @@ def render_standard_page_header(title: str, desc: str):
 
 def render_global_nav():
     group_pages = {
-        "市场分析": ["价格行情", "价差走势"],
-        "策略测算": ["套保计算", "多情景分析", "期权计算"],
-        "经营管理": ["风险敞口", "库存管理", "利润管理"],
-        "报告中心": ["分析报告", "分析历史", "策略管理", "账号设置"],
+        "市场监测": ["价格行情", "价差走势"],
+        "风险测算": ["套保计算", "多情景分析", "期权计算"],
+        "经营决策": ["风险敞口", "库存管理", "利润管理"],
+        "报告与管理": ["分析报告", "分析历史", "策略管理", "账号设置"],
     }
     page_alias = {"期权计算": "期权保险"}
     reverse_alias = {v: k for k, v in page_alias.items()}
     current_page = st.session_state.get("current_page", "首页")
     current_label = reverse_alias.get(current_page, current_page)
+
+    active_group = "首页"
+    for gname, labels in group_pages.items():
+        if current_label in labels:
+            active_group = gname
+            break
 
     st.markdown(
         f"""
@@ -2264,10 +2271,11 @@ def render_global_nav():
             <div class='eh-navbar-inner'>
                 <div class='eh-brand'>
                     <div class='eh-brand-title'>熵合科技</div>
-                    <div class='eh-brand-sub'>新能源风险管理SaaS</div>
+                    <div class='eh-brand-sub'>新能源企业风险管理SaaS平台</div>
                 </div>
                 <div class='eh-navbar-right'>
                     <div class='eh-navbar-meta'>大连熵合科技有限公司｜面向碳酸锂产业链企业的一体化数字平台</div>
+                    <div class='eh-navbar-current'>当前模块：{active_group} <span> / {current_label}</span></div>
                 </div>
             </div>
         </div>
@@ -2284,7 +2292,7 @@ def render_global_nav():
 
     for idx, (group_name, labels) in enumerate(group_pages.items(), start=1):
         active = current_label in labels
-        pop_label = f"{'● ' if active else ''}{group_name}"
+        pop_label = f"{group_name}{' ▾' if active else ' ▼'}"
         with cols[idx].popover(pop_label, use_container_width=True):
             st.markdown(f"<div class='popover-group-title'>{group_name}</div>", unsafe_allow_html=True)
             for label in labels:
@@ -2356,10 +2364,10 @@ def main():
         st.session_state.force_refresh = False
 
     current_page_for_style = st.session_state.get('current_page', '首页')
-    bg_blur = '1.15px' if current_page_for_style == '首页' else '1.8px'
-    bg_overlay_top = '0.60' if current_page_for_style == '首页' else '0.70'
-    bg_overlay_bottom = '0.70' if current_page_for_style == '首页' else '0.78'
-    shell_blur = '0.6px' if current_page_for_style == '首页' else '1px'
+    bg_blur = '0.65px' if current_page_for_style == '首页' else '1.2px'
+    bg_overlay_top = '0.48' if current_page_for_style == '首页' else '0.60'
+    bg_overlay_bottom = '0.58' if current_page_for_style == '首页' else '0.68'
+    shell_blur = '0.4px' if current_page_for_style == '首页' else '0.8px'
 
     # 自定义CSS
     banner_uri = _to_data_uri(BANNER_IMAGE_PATH)
@@ -2377,7 +2385,8 @@ def main():
         --gold: #C9A96B;
         --gold-deep: #B9924D;
         --green-soft: #EAF1EB;
-        --shadow: 0 4px 20px rgba(0,0,0,0.04);
+        --shadow: 0 10px 30px rgba(31,35,41,0.08);
+        --shadow-soft: 0 6px 18px rgba(31,35,41,0.05);
         --radius: 12px;
         --maxw: 1320px;
     }
@@ -2417,27 +2426,30 @@ def main():
         text-align:center; color:var(--muted); margin-bottom: 1.2rem;
     }
     .eh-navbar {
-        background: linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.90) 100%);
-        border: 1px solid rgba(201,169,107,0.14);
-        border-radius: 16px;
-        padding: 16px 22px 12px 22px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.93) 100%);
+        border: 1px solid rgba(201,169,107,0.16);
+        border-radius: 18px;
+        padding: 18px 24px 14px 24px;
         box-shadow: var(--shadow);
-        position: sticky; top: 0.5rem; z-index: 20; backdrop-filter: blur(10px);
-        margin-bottom: .35rem;
+        position: sticky; top: 0.55rem; z-index: 20; backdrop-filter: blur(14px);
+        margin-bottom: .45rem;
     }
-    .eh-navbar-inner {display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap;}
-    .eh-brand-title {font-size: 1.55rem; font-weight: 800; letter-spacing: 0.02em;}
-    .eh-brand-sub {font-size:.88rem; color:var(--muted); margin-top: 2px;}
-    .eh-navbar-meta {font-size:.92rem; color:var(--muted);}
+    .eh-navbar-inner {display:flex; justify-content:space-between; align-items:flex-end; gap:18px; flex-wrap:wrap;}
+    .eh-brand-title {font-size: 1.65rem; font-weight: 900; letter-spacing: 0.01em;}
+    .eh-brand-sub {font-size:.9rem; color:var(--muted); margin-top: 4px;}
+    .eh-navbar-meta {font-size:.92rem; color:var(--muted); text-align:right;}
+    .eh-navbar-current {margin-top:6px; font-size:.9rem; color:var(--gold-deep); font-weight:800; text-align:right;}
+    .eh-navbar-current span {color:var(--text); font-weight:700;}
 
     .extra-group-title {margin: .45rem 0 .65rem 0; font-size: .92rem; color: var(--gold-deep); font-weight: 800; letter-spacing: .08em;}
 
     .popover-group-title {font-size: .92rem; color: var(--gold-deep); font-weight: 800; margin-bottom: .55rem; letter-spacing: .06em;}
     div[data-testid="stPopover"] > div > button {
-        width: 100%; border-radius: 10px !important; border: 1px solid transparent !important;
-        background: transparent !important; color: var(--text) !important; font-weight: 700 !important; min-height: 2.7rem !important;
+        width: 100%; border-radius: 12px !important; border: 1px solid rgba(201,169,107,0.18) !important;
+        background: rgba(255,255,255,0.90) !important; color: var(--text) !important; font-weight: 800 !important; min-height: 2.95rem !important;
+        box-shadow: var(--shadow-soft) !important;
     }
-    div[data-testid="stPopover"] > div > button:hover {background: rgba(201,169,107,0.08) !important; border-color: rgba(201,169,107,0.28) !important;}
+    div[data-testid="stPopover"] > div > button:hover {background: rgba(201,169,107,0.08) !important; border-color: rgba(201,169,107,0.36) !important; transform: translateY(-1px);}
     div[data-testid="stPopover"] > div > button:focus {box-shadow: none !important; border-color: rgba(201,169,107,0.40) !important;}
     div[data-testid="stPopoverContent"] {border-radius: 12px !important; border: 1px solid var(--line) !important; box-shadow: 0 12px 30px rgba(0,0,0,0.10) !important;}
     div[data-testid="stPopoverContent"] button[kind="secondary"] {justify-content: flex-start !important; text-align: left !important; border-radius: 10px !important; background: #fff !important;}
@@ -2467,26 +2479,29 @@ def main():
         margin: .8rem 0 1.2rem 0;
     }
     .eh-status-item {
-        background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
-        box-shadow: var(--shadow); padding: 14px 16px;
+        background: rgba(255,255,255,0.94); border: 1px solid var(--line); border-radius: 14px;
+        box-shadow: var(--shadow-soft); padding: 14px 16px;
+        position: relative; overflow:hidden;
     }
+    .eh-status-item::before {content:''; position:absolute; left:0; top:0; bottom:0; width:4px; background: linear-gradient(180deg, var(--gold), rgba(201,169,107,0.20));}
     .eh-status-item span {display:block; font-size:.84rem; color:var(--muted); margin-bottom:4px;}
     .eh-status-item strong {font-size:1.08rem; color:var(--text);}
 
     .page-shell, .soft-card, .quick-card, [data-testid="stMetric"], [data-testid="stExpander"], .stDataFrame, [data-testid="stTable"] {
-        background: rgba(255,255,255,0.92) !important; border: 1px solid var(--line) !important; border-radius: var(--radius) !important; box-shadow: var(--shadow) !important;
+        background: rgba(255,255,255,0.94) !important; border: 1px solid rgba(232,234,237,0.95) !important; border-radius: var(--radius) !important; box-shadow: var(--shadow) !important;
         backdrop-filter: blur(__SHELL_BLUR__);
     }
-    .page-shell {padding: 24px 26px; margin: .4rem 0 1rem 0;}
+    .page-shell {padding: 26px 28px; margin: .55rem 0 1.1rem 0; position:relative; overflow:hidden;}
+    .page-shell::before {content:''; position:absolute; left:0; right:0; top:0; height:4px; background: linear-gradient(90deg, var(--gold), rgba(201,169,107,0.15));}
     .page-shell-title {font-size: 2rem; font-weight: 800; letter-spacing: -0.02em;}
     .page-shell-desc {margin-top: .4rem; color: var(--muted); line-height: 1.8;}
 
     .hero-card {padding: 0 !important; overflow: hidden; background: transparent !important; border: none !important; box-shadow:none !important;}
     .hero-banner {
-        position: relative; min-height: 500px; border-radius: 18px; overflow: hidden;
-        background: linear-gradient(90deg, rgba(27,36,48,0.56) 0%, rgba(27,36,48,0.44) 28%, rgba(255,255,255,0.05) 72%, rgba(255,255,255,0.02) 100%);
-        border: 1px solid rgba(255,255,255,0.34);
-        box-shadow: var(--shadow);
+        position: relative; min-height: 560px; border-radius: 22px; overflow: hidden;
+        background: linear-gradient(90deg, rgba(19,29,40,0.68) 0%, rgba(19,29,40,0.54) 34%, rgba(255,255,255,0.06) 72%, rgba(255,255,255,0.03) 100%);
+        border: 1px solid rgba(255,255,255,0.38);
+        box-shadow: 0 24px 60px rgba(22,28,34,0.14);
         backdrop-filter: blur(1px);
     }
     .hero-banner::before {
@@ -2494,30 +2509,42 @@ def main():
         background: linear-gradient(180deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0.00) 100%);
     }
     .hero-content {
-        position:relative; z-index:2; max-width: 680px; padding: 82px 56px; color:#fff;
+        position:relative; z-index:2; max-width: 700px; padding: 92px 60px; color:#fff;
     }
     .hero-content-panel {
         min-height: 500px; display:flex; flex-direction:column; justify-content:center;
     }
     .hero-kicker {font-size:.95rem; color: rgba(255,255,255,.76); letter-spacing: .14em; text-transform: uppercase;}
-    .hero-title {font-size: 3rem; line-height: 1.18; font-weight: 800; color:#fff; margin: 1rem 0 .9rem 0;}
+    .hero-title {font-size: 3.35rem; line-height: 1.14; font-weight: 900; color:#fff; margin: 1rem 0 .95rem 0; letter-spacing:-0.03em;}
     .hero-desc {font-size: 1.04rem; line-height: 1.9; color: rgba(255,255,255,.88); max-width: 560px;}
     .hero-action-tip {margin-top: 1.2rem; color: rgba(255,255,255,.72); font-size: .92rem;}
+    .hero-tag-row {display:flex; flex-wrap:wrap; gap:10px; margin-top: 1.2rem;}
+    .hero-tag-row span {display:inline-flex; align-items:center; padding:8px 14px; border-radius:999px; background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.18); color:#fff; font-size:.88rem; font-weight:700; backdrop-filter: blur(4px);}
+    .hero-floating-card {position:absolute; right:34px; bottom:34px; z-index:2; width:330px; background:rgba(255,255,255,0.90); border:1px solid rgba(255,255,255,0.55); border-radius:18px; padding:22px 22px 18px 22px; box-shadow: 0 18px 40px rgba(18,22,28,0.16); backdrop-filter: blur(10px);}
+    .hero-floating-title {font-size:1rem; color:var(--gold-deep); font-weight:900; letter-spacing:.06em; text-transform:uppercase;}
+    .hero-floating-text {margin-top:10px; color:var(--muted); line-height:1.8; font-size:.94rem;}
+    .hero-floating-metrics {display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap:12px; margin-top:16px;}
+    .hero-floating-metrics div {background:#fff; border:1px solid rgba(201,169,107,0.14); border-radius:14px; padding:12px 10px; text-align:center; box-shadow: var(--shadow-soft);}
+    .hero-floating-metrics strong {display:block; font-size:1.3rem; color:var(--text);}
+    .hero-floating-metrics span {display:block; margin-top:4px; color:var(--muted); font-size:.76rem; line-height:1.45;}
 
     .section-title {font-size: 1.8rem; font-weight: 800; margin: 1.5rem 0 .35rem 0; letter-spacing: -.02em;}
     .section-kicker {font-size: .92rem; color: var(--gold-deep); text-transform: uppercase; letter-spacing: .12em;}
     .section-subtle {color: var(--muted); line-height: 1.9; margin-bottom: 1rem;}
 
     .intro-grid {display:grid; grid-template-columns: minmax(0, 1fr); gap: 20px; margin: 1rem 0 1.2rem 0;}
-    .intro-card {padding: 30px 34px; background: rgba(255,255,255,0.96); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); max-width: 1120px; margin: 0 auto;}
+    .intro-card {padding: 34px 38px; background: rgba(255,255,255,0.97); border:1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); max-width: 1120px; margin: 0 auto; position:relative; overflow:hidden;}
+    .intro-card::before {content:''; position:absolute; left:0; top:0; bottom:0; width:5px; background: linear-gradient(180deg, var(--gold), rgba(201,169,107,0.14));}
     .intro-card p {color: var(--muted); line-height: 1.95; font-size: 1rem; margin: 0 0 1.1rem 0;}
     .intro-card p:last-child {margin-bottom: 0;}
 
     .cap-grid {display:grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 16px; margin: .9rem 0 1.2rem 0;}
     .scene-grid {display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 16px; margin: .9rem 0 1.2rem 0;}
     .cap-card, .scene-card {
-        background: var(--card); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px;
+        background: rgba(255,255,255,0.98); border:1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow-soft); padding: 24px; position:relative; overflow:hidden; transition: transform .18s ease, box-shadow .18s ease;
     }
+    .cap-card:hover, .scene-card:hover {transform: translateY(-4px); box-shadow: var(--shadow);}
+    .cap-card::after, .scene-card::after {content:''; position:absolute; left:0; right:0; top:0; height:3px; background: linear-gradient(90deg, rgba(201,169,107,0.95), rgba(201,169,107,0.08));}
     .cap-index, .scene-index {font-size:.82rem; color: var(--gold-deep); font-weight:700; letter-spacing:.08em;}
     .cap-title, .scene-title {font-size: 1.15rem; font-weight:800; margin:.55rem 0 .45rem 0;}
     .cap-text, .scene-text {color: var(--muted); line-height:1.8; font-size:.94rem;}
@@ -2526,8 +2553,8 @@ def main():
         display:grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 14px; margin: 1rem 0 1.3rem 0;
     }
     .process-step {
-        position:relative; background:var(--card); border:1px solid var(--line); border-radius: var(--radius); padding: 20px 16px; box-shadow: var(--shadow);
-        min-height: 118px;
+        position:relative; background:rgba(255,255,255,0.98); border:1px solid var(--line); border-radius: 16px; padding: 22px 18px; box-shadow: var(--shadow-soft);
+        min-height: 126px;
     }
     .process-step:not(:last-child)::after {
         content: "→"; position:absolute; right:-12px; top:50%; transform:translateY(-50%); color: var(--gold-deep); font-size: 1.35rem; font-weight:700;
@@ -2536,17 +2563,18 @@ def main():
     .process-title {font-size: 1rem; font-weight:700; line-height:1.7;}
 
     .home-footer {
-        margin-top: 1.4rem; background: linear-gradient(180deg,#fff,#fafafa); border:1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px 26px;
+        margin-top: 1.5rem; background: linear-gradient(180deg,#fff,#fafaf8); border:1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 24px 28px; position:relative; overflow:hidden;
     }
+    .home-footer::before {content:''; position:absolute; inset:0 auto 0 0; width:6px; background: linear-gradient(180deg, var(--gold), rgba(201,169,107,0.18));}
     .home-footer-title {font-size:1.08rem; font-weight:800; margin-bottom:8px;}
     .home-footer p {margin:.25rem 0; color: var(--muted);}
 
     .stButton > button {
-        border-radius: 12px !important; min-height: 2.9rem !important; font-weight: 700 !important;
-        border: 1px solid rgba(201,169,107,.25) !important; background: #fff !important; color: var(--text) !important;
-        box-shadow: var(--shadow) !important;
+        border-radius: 12px !important; min-height: 2.95rem !important; font-weight: 800 !important;
+        border: 1px solid rgba(201,169,107,.24) !important; background: rgba(255,255,255,0.96) !important; color: var(--text) !important;
+        box-shadow: var(--shadow-soft) !important; transition: all .18s ease !important;
     }
-    .stButton > button:hover {border-color: var(--gold) !important; color: var(--gold-deep) !important;}
+    .stButton > button:hover {border-color: var(--gold) !important; color: var(--gold-deep) !important; transform: translateY(-1px); box-shadow: var(--shadow) !important;}
     button[kind="primary"], button[data-testid="baseButton-primary"] {
         background: linear-gradient(135deg, #cfb177 0%, #b9924d 100%) !important; color:#fff !important; border:none !important;
     }
@@ -2559,14 +2587,17 @@ def main():
 
     @media (max-width: 1100px) {
         .eh-statusbar, .cap-grid, .scene-grid, .process-wrap, .intro-grid {grid-template-columns: 1fr 1fr !important;}
-        .hero-content {padding: 56px 32px;}
-        .hero-title {font-size: 2.3rem;}
+        .hero-content {padding: 62px 36px;}
+        .hero-title {font-size: 2.55rem;}
+        .hero-floating-card {position:relative; right:auto; bottom:auto; width:auto; margin: 0 36px 36px 36px;}
     }
     @media (max-width: 760px) {
         .eh-navbar-inner, .intro-grid, .cap-grid, .scene-grid, .process-wrap, .eh-statusbar {grid-template-columns: 1fr !important; display:grid !important;}
-        .hero-banner {min-height: 460px;}
-        .hero-content {padding: 40px 22px;}
-        .hero-title {font-size: 2rem;}
+        .hero-banner {min-height: 500px;}
+        .hero-content {padding: 42px 22px;}
+        .hero-title {font-size: 2.1rem;}
+        .hero-tag-row {gap:8px;}
+        .hero-floating-card {margin: 0 22px 22px 22px; padding:18px;}
     }
     </style>
     """
@@ -2844,14 +2875,18 @@ def _close_card():
 
 def _matplotlib_style(ax, title: str | None = None, xlabel: str | None = None, ylabel: str | None = None):
     try:
-        ax.set_facecolor("#FCFBF7")
-        ax.grid(True, alpha=0.22, linestyle="--", linewidth=0.8, color="#d8cdb8")
+        ax.set_facecolor("#FDFBF7")
+        ax.grid(True, alpha=0.18, linestyle="--", linewidth=0.8, color="#d7ccb6")
         for side in ["top", "right"]:
             ax.spines[side].set_visible(False)
         for side in ["left", "bottom"]:
             ax.spines[side].set_color("#d8cdb8")
             ax.spines[side].set_linewidth(1.0)
         ax.tick_params(colors="#5b6470", labelsize=10)
+        try:
+            ax.title.set_fontweight('bold')
+        except Exception:
+            pass
         if title is not None:
             ax.set_title(title, fontsize=16, fontweight="bold", color="#2B2F33", pad=12)
         if xlabel is not None:
@@ -2908,7 +2943,22 @@ def render_home_page(analyzer):
                         面向碳酸锂产业链企业的一体化数字平台。围绕价格波动、基差风险、套期保值与压力测试，
                         提供从市场监测到策略评估、从经营分析到管理报告输出的一站式风险管理支持。
                     </div>
-                    <div class='hero-action-tip'>企业官网级首页风格 + 产业数据平台化内页视觉</div>
+                    <div class='hero-action-tip'>企业官网级首页风格 · 产业数据平台化内页视觉 · 可用于比赛/路演展示</div>
+                    <div class='hero-tag-row'>
+                        <span>真实市场数据</span>
+                        <span>动态风险建模</span>
+                        <span>套保与期权测算</span>
+                        <span>管理层报告输出</span>
+                    </div>
+                </div>
+                <div class='hero-floating-card'>
+                    <div class='hero-floating-title'>平台定位</div>
+                    <div class='hero-floating-text'>围绕“市场监测—风险识别—策略测算—报告输出”的完整链路，形成更接近企业级产品的风控工作台。</div>
+                    <div class='hero-floating-metrics'>
+                        <div><strong>6</strong><span>核心功能模块</span></div>
+                        <div><strong>4</strong><span>典型应用场景</span></div>
+                        <div><strong>1</strong><span>一体化风险平台</span></div>
+                    </div>
                 </div>
             </div>
         </div>
