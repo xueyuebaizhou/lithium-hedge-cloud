@@ -3102,7 +3102,7 @@ def render_home_page(analyzer):
         ("05", "期权策略支持", "为锁定采购上限或销售下限提供期权成本测算与情景比较支持。"),
         ("06", "风险报告输出", "自动汇总关键市场信息、风险敞口、情景结果与建议，便于路演展示和管理层汇报。"),
     ]
-    st.markdown("<div class='section-kicker'>Core Capability</div><div class='section-title'>核心能力</div><div class='section-subtle'>保留原有功能逻辑，仅对视觉结构、展示层次和页面气质进行整体升级。</div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-kicker'>Core Capability</div><div class='section-title'>核心能力</div>", unsafe_allow_html=True)
     cards_html = "".join([f"<div class='cap-card'><div class='cap-index'>{i}</div><div class='cap-title'>{t}</div><div class='cap-text'>{d}</div></div>" for i,t,d in capabilities])
     st.markdown(f"<div class='cap-grid'>{cards_html}</div>", unsafe_allow_html=True)
 
