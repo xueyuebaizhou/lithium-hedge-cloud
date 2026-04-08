@@ -19,6 +19,11 @@ import math
 import re
 import requests
 from typing import Optional, Dict, Any, List
+
+try:
+    from utils.ai_report import generate_hedge_analysis_report
+except Exception:
+    generate_hedge_analysis_report = None
 warnings.filterwarnings('ignore')
 
 # =========================
@@ -3135,6 +3140,42 @@ def render_home_page(analyzer):
     )
 
 
+
+
+def build_ai_report_input_for_hedge(cost_price: float, inventory: float, hedge_ratio: float, margin_rate: float, metrics: dict, basis_info: dict | None = None) -> dict:
+    basis_info = basis_info or {}
+    current_price = float(metrics.get("current_price") or 0.0)
+    hedge_contracts = int(metrics.get("hedge_contracts_int") or 0)
+    total_margin = float(metrics.get("total_margin") or 0.0)
+    current_profit = float(metrics.get("current_profit") or 0.0)
+    basis_value = basis_info.get("basis")
+    if basis_value is None and basis_info.get("analysis_spot_price") is not None:
+        try:
+            basis_value = current_price - float(basis_info.get("analysis_spot_price"))
+        except Exception:
+            basis_value = None
+    pnl_unhedged = current_profit
+    pnl_hedged = current_profit * (1 - float(hedge_ratio or 0.0))
+    pnl_improvement = pnl_hedged - pnl_unhedged
+    return {
+        "hedge_side": "卖出套保" if inventory > 0 else "未识别",
+        "inventory_qty": float(inventory or 0.0),
+        "spot_price": basis_info.get("analysis_spot_price"),
+        "real_cost": float(cost_price or 0.0),
+        "futures_price": current_price,
+        "basis": basis_value,
+        "basis_label": basis_info.get("basis_source_label", "未提供"),
+        "hedge_ratio": float(hedge_ratio or 0.0),
+        "hedge_lots": hedge_contracts,
+        "margin": total_margin,
+        "pnl_unhedged": pnl_unhedged,
+        "pnl_hedged": pnl_hedged,
+        "pnl_improvement": pnl_improvement,
+        "stress_note": f"基于当前页面测算参数形成的情景分析；当前盈亏 {current_profit:,.0f} 元。",
+        "margin_rate": float(margin_rate or 0.0),
+        "latest_date": metrics.get("latest_date"),
+    }
+
 def render_hedge_page(analyzer):
     """渲染套保计算页面"""
     render_standard_page_header("套保计算", "结合库存、成本与套保比例进行策略测算，输出指标卡、情景图表与分析建议。")
@@ -3334,7 +3375,52 @@ def render_hedge_page(analyzer):
             
             # 详细建议
             with st.expander("详细分析报告", expanded=True):
-                st.markdown(results['suggestions'])
+                suggestions = results.get('suggestions', [])
+                if isinstance(suggestions, str):
+                    st.markdown(suggestions)
+                else:
+                    for item in suggestions:
+                        st.markdown(f"- {item}")
+
+            st.markdown("#### AI详细分析报告")
+            st.caption("说明：AI报告仅基于当前页面测算结果生成，用于辅助解读，不构成实际交易指令或收益承诺。")
+            basis_info = st.session_state.get("basis_data", {}) or {}
+            ai_input = build_ai_report_input_for_hedge(
+                cost_price=params.get('cost_price', 0.0),
+                inventory=params.get('inventory', 0.0),
+                hedge_ratio=params.get('hedge_ratio', 0.0),
+                margin_rate=params.get('margin_rate', 0.0),
+                metrics=metrics,
+                basis_info=basis_info,
+            )
+            st.session_state.setdefault("ai_hedge_report", "")
+            st.session_state.setdefault("ai_hedge_report_error", "")
+
+            ai_col1, ai_col2 = st.columns([1, 1])
+            with ai_col1:
+                if st.button("生成AI分析报告", type="primary", use_container_width=True, key="generate_ai_hedge_report"):
+                    if generate_hedge_analysis_report is None:
+                        st.session_state["ai_hedge_report_error"] = "未检测到 utils/ai_report.py，请先将 AI 文件放入 utils 目录。"
+                        st.session_state["ai_hedge_report"] = ""
+                    else:
+                        with st.spinner("正在生成AI分析报告..."):
+                            try:
+                                report = generate_hedge_analysis_report(ai_input)
+                                st.session_state["ai_hedge_report"] = report
+                                st.session_state["ai_hedge_report_error"] = ""
+                            except Exception as e:
+                                st.session_state["ai_hedge_report_error"] = f"AI分析生成失败：{e}"
+                                st.session_state["ai_hedge_report"] = ""
+            with ai_col2:
+                if st.button("清空AI报告", use_container_width=True, key="clear_ai_hedge_report"):
+                    st.session_state["ai_hedge_report"] = ""
+                    st.session_state["ai_hedge_report_error"] = ""
+
+            if st.session_state.get("ai_hedge_report_error"):
+                st.error(st.session_state["ai_hedge_report_error"])
+
+            if st.session_state.get("ai_hedge_report"):
+                st.markdown(st.session_state["ai_hedge_report"])
             
             # 导出功能
             st.markdown("#### 导出结果")
