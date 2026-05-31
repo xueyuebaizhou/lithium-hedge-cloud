@@ -2299,7 +2299,7 @@ def render_global_nav():
         unsafe_allow_html=True,
     )
 
-    cols = st.columns([1.0, 1.12, 1.12, 1.12, 1.12, 1.55, 1.0], gap="small")
+    cols = st.columns([1.0, 1.12, 1.12, 1.12, 1.35, 1.45, 0.82], gap="small")
     home_active = current_page == "首页"
     if cols[0].button(f"{'● ' if home_active else ''}首页", key="nav_home_btn", use_container_width=True):
         st.session_state.public_auth_requested = False
